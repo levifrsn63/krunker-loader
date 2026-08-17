@@ -66,7 +66,6 @@
             this.exports = null;
             this.gameVersion = '';
             this.gameJS = '';
-            this.weaponIconCache = {};
             this.notifyContainer = null;
             this.legitTarget = null;
             this.lastTargetChangeTime = 0;
@@ -94,13 +93,6 @@
             this.currentBindingSetting = null;
             this.pressedKeys = new Set();
 
-            this.espPreviewCanvas = null;
-            this.espPreviewCtx = null;
-            this.espCharImg = null;
-            this.espCharLoaded = false;
-            this.espWeaponImg = null;
-            this.espWeaponLoaded = false;
-
             this.defaultSettings = {
                 aimbotEnabled: true,
                 aimbotOnRightMouse: false,
@@ -117,8 +109,6 @@
                 espLines: true,
                 espSquare: true,
                 espNameTags: true,
-                espWeaponIcons: true,
-                espInfoBackground: true,
                 espTeamCheck: true,
                 espBotCheck: true,
                 wireframeEnabled: false,
@@ -172,7 +162,6 @@
                 aimbotWallBangs: 'Numpad6',
                 espLines: 'Numpad7',
                 espNameTags: 'Numpad8',
-                espWeaponIcons: 'Numpad9',
             };
             this.settings = {};
             this.hotkeys = {};
@@ -187,7 +176,7 @@
                     this.initGameGUI();
                 });
                 this.addEventListeners();
-                this.preloadESPAssets();
+    
                 console.log("hvhm: Successfully Initialized!");
             } catch (error) {
                 console.error('hvhm: FATAL ERROR during initialization.', error);
@@ -214,88 +203,9 @@
             }
         }
 
-        preloadESPAssets() {
-            this.espCharImg = new Image();
-            this.espCharImg.crossOrigin = 'anonymous';
-            this.espCharImg.onload = () => { this.espCharLoaded = true; if (this.espPreviewCtx) this.renderESPPreview(); };
-            this.espCharImg.src = '';
-            this.espWeaponImg = new Image();
-            this.espWeaponImg.crossOrigin = 'anonymous';
-            this.espWeaponImg.onload = () => { this.espWeaponLoaded = true; if (this.espPreviewCtx) this.renderESPPreview(); };
-            this.espWeaponImg.src = 'https://assets.krunker.io/textures/weapons/icon_1.png';
-        }
+        // ESP preview assets removed
 
-        renderESPPreview() {
-            const c = this.espPreviewCanvas; if (!c) return;
-            const ctx = this.espPreviewCtx; if (!ctx) return;
-            const w = c.width, h = c.height;
-            ctx.clearRect(0, 0, w, h);
-            ctx.fillStyle = '#0d0815'; ctx.fillRect(0, 0, w, h);
-
-            ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1;
-            for (let i = 0; i < w; i += 25) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, h); ctx.stroke(); }
-            for (let i = 0; i < h; i += 25) { ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(w, i); ctx.stroke(); }
-
-            const cx = w / 2;
-            let charTop = 55, charH = 310, charW = 110;
-            if (this.espCharLoaded && this.espCharImg) {
-                const ratio = this.espCharImg.width / this.espCharImg.height;
-                charW = charH * ratio; if (charW > w - 16) { charW = w - 16; charH = charW / ratio; }
-                const charX = cx - charW / 2; charTop = (h - charH) / 2 - 10;
-                ctx.globalAlpha = 0.9; ctx.drawImage(this.espCharImg, charX, charTop, charW, charH); ctx.globalAlpha = 1.0;
-            }
-
-            const boxPad = 10;
-            const bx = cx - charW / 2 - boxPad, by = charTop - boxPad, bw = charW + boxPad * 2, bh = charH + boxPad * 2;
-
-            if (this.settings.espLines) {
-                const hr = (hex, a) => { let r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16); return `rgba(${r},${g},${b},${a})`; };
-                const grad = ctx.createLinearGradient(w / 2, h, cx, by + bh);
-                grad.addColorStop(0, hr(this.settings.espColor, 0.9)); grad.addColorStop(1, hr(this.settings.espColor, 0.1));
-                ctx.strokeStyle = grad; ctx.lineWidth = 2.5; ctx.shadowColor = this.settings.espColor; ctx.shadowBlur = 15;
-                ctx.beginPath(); ctx.moveTo(w / 2, h); ctx.lineTo(cx, by + bh); ctx.stroke(); ctx.shadowBlur = 0;
-            }
-
-            if (this.settings.espSquare) {
-                ctx.strokeStyle = this.settings.boxColor; ctx.lineWidth = 2; ctx.shadowColor = this.settings.boxColor; ctx.shadowBlur = 10;
-                ctx.strokeRect(bx, by, bw, bh); ctx.shadowBlur = 0;
-            }
-
-            const hpPct = 0.72; const barX = bx - 9, barW = 5;
-            ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(barX, by, barW, bh);
-            ctx.fillStyle = '#FDD835'; ctx.fillRect(barX, by + bh * (1 - hpPct), barW, bh * hpPct);
-            ctx.font = 'bold 12px Rajdhani,sans-serif'; ctx.textAlign = 'right'; ctx.fillStyle = '#fff';
-            ctx.shadowColor = '#000'; ctx.shadowBlur = 3; ctx.fillText('♥ 72', barX - 3, by + 13); ctx.shadowBlur = 0;
-
-            if (this.settings.espNameTags) {
-                const nameText = 'Player_01';
-                const wpnText = this.settings.espWeaponIcons ? ' • AK-47' : '';
-                const fullText = nameText + wpnText;
-                ctx.font = 'bold 13px Rajdhani,sans-serif'; ctx.textAlign = 'left';
-                const tw = ctx.measureText(fullText).width;
-                let iconW = 0, iconH = 18;
-                if (this.settings.espWeaponIcons && this.espWeaponLoaded && this.espWeaponImg) {
-                    iconW = this.espWeaponImg.width * (iconH / this.espWeaponImg.height);
-                }
-                const tagW = tw + (iconW > 0 ? iconW + 6 : 0) + 16, tagH = 26;
-                const tagX = cx - tagW / 2, tagY = by - tagH - 8;
-                if (this.settings.espInfoBackground) {
-                    ctx.fillStyle = 'rgba(25,10,30,0.7)'; ctx.strokeStyle = this.settings.boxColor; ctx.lineWidth = 1;
-                    ctx.shadowColor = this.settings.boxColor; ctx.shadowBlur = 8;
-                    ctx.beginPath(); ctx.roundRect(tagX, tagY, tagW, tagH, 4); ctx.fill(); ctx.stroke(); ctx.shadowBlur = 0;
-                }
-                ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.shadowColor = 'rgba(255,255,255,0.4)'; ctx.shadowBlur = 4;
-                ctx.fillText(fullText, tagX + 8, tagY + 18); ctx.shadowBlur = 0;
-                if (iconW > 0) {
-                    const iconX = tagX + 8 + tw + 6; const iconY = tagY + (tagH - iconH) / 2;
-                    ctx.drawImage(this.espWeaponImg, iconX, iconY, iconW, iconH);
-                }
-            }
-
-            ctx.font = 'bold 12px Rajdhani,sans-serif'; ctx.textAlign = 'center';
-            ctx.fillStyle = '#fff'; ctx.shadowColor = '#000'; ctx.shadowBlur = 3;
-            ctx.fillText('[24m]', cx, by + bh + 18); ctx.shadowBlur = 0;
-        }
+        // ESP preview removed
 
         async checkForUpdates() {
             const current = GM_info.script.version || '0.0.0';
@@ -921,10 +831,7 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
 .hvhm-color-preview{width:16px!important;height:16px!important;border:1px solid rgba(255,255,255,0.3)!important;border-radius:3px!important;flex-shrink:0!important;}
 .hvhm-hk-btn{background:rgba(255,255,255,0.05)!important;color:#f5f5f5!important;border:1px solid rgba(255,255,255,0.14)!important;border-radius:6px!important;padding:3px 9px!important;cursor:pointer!important;font-family:ui-monospace,'IBM Plex Mono',monospace!important;font-size:11px!important;min-width:26px!important;text-align:center!important;}
 .hvhm-hk-btn.bound{background:#fff!important;color:#000!important;border-color:#fff!important;}
-.hvhm-esp-panel{border-top:1px solid rgba(255,255,255,0.1)!important;padding:8px!important;background:#0a0a0a!important;flex-shrink:0!important;}
-.hvhm-esp-title{color:rgba(255,255,255,0.4)!important;font-size:10px!important;font-weight:600!important;letter-spacing:1.2px!important;text-align:center!important;margin-bottom:6px!important;text-transform:uppercase!important;}
-.hvhm-esp-wrap{text-align:center!important;}
-#hvhm-espCanvas{background:#000!important;border:1px solid rgba(255,255,255,0.1)!important;border-radius:6px!important;}
+
 .hvhm-hotkey-modal{position:fixed!important;inset:0!important;background:rgba(0,0,0,0.7)!important;display:none!important;align-items:center!important;justify-content:center!important;z-index:2147483647!important;}
 .hvhm-hotkey-modal.active{display:flex!important;}
 .hvhm-hotkey-modal-box{background:#0a0a0a!important;border:1px solid rgba(255,255,255,0.14)!important;border-radius:12px!important;padding:24px!important;text-align:center!important;color:#f5f5f5!important;font-family:'Instrument Sans',sans-serif!important;box-shadow:0 20px 60px rgba(0,0,0,0.6)!important;}
@@ -1002,8 +909,7 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
                 fovSize:'FOV radius. 0 = full screen.', drawFovCircle:'Displays FOV circle.',
                 espTeamCheck:'No ESP for teammates.', espBotCheck:'ESP for AI/bots.',
                 espLines:'Line from bottom to enemies.', espSquare:'Box around enemies.',
-                espNameTags:'Name, health, weapon info.', espWeaponIcons:'Weapon icon in info.',
-                espInfoBackground:'Background for info panel.', espColor:'ESP line color.',
+                espNameTags:'Name & distance only.', espColor:'ESP line color.',
                 boxColor:'Box & info color.', botColor:'Bot ESP color.',
                 wireframeEnabled:'Wireframe rendering.', unlockSkins:'Client-side skin unlocker.',
                 bhopEnabled:'Hold space auto-jump.', antiAimEnabled:'Makes you harder to hit.',
@@ -1029,8 +935,6 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
 
             setTimeout(() => {
                 this.bindMenuEvents();
-                this.espPreviewCanvas = document.getElementById('hvhm-espCanvas');
-                if (this.espPreviewCanvas) { this.espPreviewCtx = this.espPreviewCanvas.getContext('2d'); this.renderESPPreview(); }
             }, 100);
 
             return `
@@ -1070,8 +974,6 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
             ${this.createMenuItemHTML('toggle','espSquare','ESP Box', I.espSquare, tips.espSquare)}
             ${this.createMenuItemHTML('toggle','espLines','ESP Lines', I.line, tips.espLines)}
             ${this.createMenuItemHTML('toggle','espNameTags','Name Tags', I.nameTags, tips.espNameTags)}
-            ${this.createMenuItemHTML('toggle','espWeaponIcons','Weapon Icons', I.weaponIcons, tips.espWeaponIcons)}
-            ${this.createMenuItemHTML('toggle','espInfoBackground','Info Background', I.espInfoBg, tips.espInfoBackground)}
             ${this.createMenuItemHTML('toggle','wireframeEnabled','Wireframe', I.wireframe, tips.wireframeEnabled)}
             ${this.createMenuItemHTML('toggle','chamsEnabled','Chams (Highlight)', I.palette, tips.chamsEnabled)}
             ${this.createMenuItemHTML('toggle','chamsThroughWalls','Chams Through Walls', I.wall, tips.chamsThroughWalls)}
@@ -1103,12 +1005,6 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
             ${this.createMenuItemHTML('toggle','autoReload','Auto Reload', I.autoReload, tips.autoReload)}
             <div class="hvhm-section">Other</div>
             ${this.createMenuItemHTML('toggle','unlockSkins','Unlock All Skins', I.unlockSkins, tips.unlockSkins)}
-        </div>
-    </div>
-    <div class="hvhm-esp-panel">
-        <div class="hvhm-esp-title">ESP Preview</div>
-        <div class="hvhm-esp-wrap">
-            <canvas id="hvhm-espCanvas" width="200" height="450"></canvas>
         </div>
     </div>
 </div>
@@ -1182,7 +1078,7 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
                     this.saveSettings('hvhm_settings', this.settings);
                     menuItem.classList.toggle('active');
                     menuItem.querySelector('.hvhm-toggle-switch').classList.toggle('active');
-                    if (this.espPreviewCtx) this.renderESPPreview();
+                    
                 } else if (menuItem.querySelector('.hvhm-color-picker-input')) {
                     menuItem.querySelector('.hvhm-color-picker-input').click();
                 }
@@ -1193,7 +1089,7 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
                 this.settings[setting] = e.target.value;
                 this.saveSettings('hvhm_settings', this.settings);
                 menu.querySelector(`.hvhm-color-preview[data-setting="${setting}"]`).style.backgroundColor = e.target.value;
-                if (this.espPreviewCtx) this.renderESPPreview();
+                
             }));
 
             menu.querySelectorAll('.hvhm-slider').forEach(slider => {
@@ -1261,7 +1157,7 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
                             const item = menu.querySelector(`.hvhm-menu-item[data-setting="${action}"]`);
                             if (item) { item.classList.toggle('active', this.settings[action]); const toggle = item.querySelector('.hvhm-toggle-switch'); if (toggle) toggle.classList.toggle('active', this.settings[action]); }
                         }
-                        if (this.espPreviewCtx) this.renderESPPreview();
+                        
                     }
                 }
             });
@@ -1374,77 +1270,36 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
             }
             if (!onScreen || !isFinite(xmin + xmax + ymin + ymax)) return;
             const boxWidth = xmax - xmin; const boxHeight = ymax - ymin;
+            const col = isBot ? this.settings.botColor : this.settings.boxColor;
             CRC2d.save.apply(this.ctx, []);
 
             if (this.settings.espLines) {
-                const startX = this.overlay.canvas.width / 2, startY = this.overlay.canvas.height, endX = xmin + boxWidth / 2, endY = ymax, trailColor = isBot ? this.settings.botColor : this.settings.espColor;
-                const hexToRgba = (hex, alpha) => { let r=0,g=0,b=0; if (hex.length == 7) { r=parseInt(hex.slice(1,3),16); g=parseInt(hex.slice(3,5),16); b=parseInt(hex.slice(5,7),16); } return `rgba(${r},${g},${b},${alpha})`; };
-                const gradient = this.ctx.createLinearGradient(startX, startY, endX, endY);
-                gradient.addColorStop(0, hexToRgba(trailColor, 0.7)); gradient.addColorStop(1, hexToRgba(trailColor, 0));
-                this.ctx.lineWidth = 2.5; this.ctx.strokeStyle = gradient; this.ctx.shadowColor = trailColor; this.ctx.shadowBlur = 15;
+                const startX = this.overlay.canvas.width / 2, startY = this.overlay.canvas.height, endX = xmin + boxWidth / 2, endY = ymax;
+                this.ctx.lineWidth = 1; this.ctx.strokeStyle = isBot ? this.settings.botColor : this.settings.espColor;
                 CRC2d.beginPath.apply(this.ctx, []); CRC2d.moveTo.apply(this.ctx, [startX, startY]); CRC2d.lineTo.apply(this.ctx, [endX, endY]); CRC2d.stroke.apply(this.ctx, []);
             }
 
             if (this.settings.espSquare) {
-                this.ctx.shadowColor = this.settings.boxColor; this.ctx.shadowBlur = 10; this.ctx.lineWidth = 1.5; this.ctx.strokeStyle = isBot ? this.settings.botColor : this.settings.boxColor;
+                this.ctx.lineWidth = 1.5; this.ctx.strokeStyle = col;
                 CRC2d.strokeRect.apply(this.ctx, [xmin, ymin, boxWidth, boxHeight]);
             }
 
             if (player.health && player.maxHealth) {
                 const healthPercentage = Math.max(0, player.health / player.maxHealth);
-                const barX = xmin - 7; const barY = ymin; const barWidth = 4; const barHeight = boxHeight;
+                const barX = xmin - 6; const barY = ymin; const barWidth = 3; const barHeight = boxHeight;
                 this.ctx.fillStyle = "rgba(0,0,0,0.5)"; CRC2d.fillRect.apply(this.ctx, [barX, barY, barWidth, barHeight]);
                 this.ctx.fillStyle = healthPercentage > 0.75 ? "#43A047" : healthPercentage > 0.4 ? "#FDD835" : "#E53935";
-                CRC2d.fillRect.apply(this.ctx, [barX, barY + barHeight * (1-healthPercentage), barWidth, barHeight * healthPercentage]);
-                this.ctx.font = "bold 11px Rajdhani, sans-serif"; this.ctx.textAlign = "right"; this.ctx.fillStyle = "#FFFFFF";
-                this.ctx.shadowColor = '#000000'; this.ctx.shadowBlur = 4;
-                CRC2d.fillText.apply(this.ctx, [`♥ ${Math.round(player.health)}`, barX - 4, barY + 11]);
+                CRC2d.fillRect.apply(this.ctx, [barX, barY + barHeight * (1 - healthPercentage), barWidth, barHeight * healthPercentage]);
             }
 
             if (this.settings.espNameTags) {
-                this.ctx.font = "bold 11px Rajdhani, sans-serif"; this.ctx.textAlign = "left";
-                const padding = 4; const iconHeight = 16; const borderRadius = 4; let iconWidth = 0;
-                const hasWeapon = player.weapon && player.weapon.name;
-                let weaponIcon = null;
-                if (hasWeapon && this.settings.espWeaponIcons && player.weapon.icon) {
-                    if (!this.weaponIconCache) this.weaponIconCache = {};
-                    const cacheKey = (player.weapon.melee ? 'melee_' : 'weapons_') + player.weapon.icon;
-                    if (!this.weaponIconCache[cacheKey]) { this.weaponIconCache[cacheKey] = new Image(); this.weaponIconCache[cacheKey].src = `https://assets.krunker.io/textures/${player.weapon.melee ? 'melee' : 'weapons'}/${player.weapon.icon}.png`; }
-                    weaponIcon = this.weaponIconCache[cacheKey];
-                    if (weaponIcon.complete && weaponIcon.naturalWidth > 0) { iconWidth = weaponIcon.width * (iconHeight / weaponIcon.height); }
-                }
-                const namePart = isBot ? `[AI] ${player.name || 'Bot'}` : player.level ? `[LVL ${player.level}] ${player.name || 'Player'}` : `${player.name || 'Player'}`;
-                const weaponPart = hasWeapon ? ` • ${player.weapon.name}` : '';
-                const fullText = namePart + weaponPart;
-                const fullTextWidth = this.ctx.measureText(fullText).width;
-                const infoBoxWidth = fullTextWidth + (iconWidth > 0 ? iconWidth + padding : 0) + padding * 2;
-                const infoBoxHeight = 20;
-                const infoBoxX = (xmin + boxWidth / 2) - (infoBoxWidth / 2); const infoBoxY = ymin - infoBoxHeight - 5;
-
-                if (this.settings.espInfoBackground) {
-                    this.ctx.fillStyle = "rgba(25, 10, 30, 0.55)"; this.ctx.strokeStyle = isBot ? this.settings.botColor : this.settings.boxColor;
-                    this.ctx.lineWidth = 1; this.ctx.shadowColor = isBot ? this.settings.botColor : this.settings.boxColor; this.ctx.shadowBlur = 6;
-                    CRC2d.beginPath.apply(this.ctx, []);
-                    CRC2d.moveTo.apply(this.ctx, [infoBoxX + borderRadius, infoBoxY]);
-                    CRC2d.lineTo.apply(this.ctx, [infoBoxX + infoBoxWidth - borderRadius, infoBoxY]);
-                    CRC2d.arcTo.apply(this.ctx, [infoBoxX + infoBoxWidth, infoBoxY, infoBoxX + infoBoxWidth, infoBoxY + borderRadius, borderRadius]);
-                    CRC2d.lineTo.apply(this.ctx, [infoBoxX + infoBoxWidth, infoBoxY + infoBoxHeight - borderRadius]);
-                    CRC2d.arcTo.apply(this.ctx, [infoBoxX + infoBoxWidth, infoBoxY + infoBoxHeight, infoBoxX + infoBoxWidth - borderRadius, infoBoxY + infoBoxHeight, borderRadius]);
-                    CRC2d.lineTo.apply(this.ctx, [infoBoxX + borderRadius, infoBoxY + infoBoxHeight]);
-                    CRC2d.arcTo.apply(this.ctx, [infoBoxX, infoBoxY + infoBoxHeight, infoBoxX, infoBoxY + infoBoxHeight - borderRadius, borderRadius]);
-                    CRC2d.lineTo.apply(this.ctx, [infoBoxX, infoBoxY + borderRadius]);
-                    CRC2d.arcTo.apply(this.ctx, [infoBoxX, infoBoxY, infoBoxX + borderRadius, infoBoxY, borderRadius]);
-                    CRC2d.closePath.apply(this.ctx, []); CRC2d.fill.apply(this.ctx, []); CRC2d.stroke.apply(this.ctx, []);
-                }
-                this.ctx.fillStyle = "#FFFFFF";
-                if (this.settings.espInfoBackground) { this.ctx.shadowColor = '#ffffff80'; this.ctx.shadowBlur = 4; }
-                else { this.ctx.shadowColor = '#000000'; this.ctx.shadowBlur = 5; }
-                CRC2d.fillText.apply(this.ctx, [fullText, infoBoxX + padding, infoBoxY + infoBoxHeight / 2 + 4]);
-                if (weaponIcon && weaponIcon.complete && iconWidth > 0) { this.ctx.drawImage(weaponIcon, infoBoxX + padding + fullTextWidth + padding, infoBoxY + (infoBoxHeight - iconHeight) / 2, iconWidth, iconHeight); }
-                this.ctx.shadowBlur = 0;
+                const name = isBot ? (player.name || 'Bot') : (player.name || 'Player');
+                this.ctx.font = "600 12px 'IBM Plex Mono', monospace"; this.ctx.textAlign = "center"; this.ctx.shadowBlur = 0;
+                this.ctx.fillStyle = col;
+                CRC2d.fillText.apply(this.ctx, [name, xmin + boxWidth / 2, ymin - 6]);
                 const distance = Math.round(Math.sqrt((this.me.x-player.x)**2+(this.me.y-player.y)**2+(this.me.z-player.z)**2) / 10);
-                this.ctx.textAlign = "center"; this.ctx.fillStyle = "#FFFFFF"; this.ctx.shadowColor = '#000000'; this.ctx.shadowBlur = 4;
-                CRC2d.fillText.apply(this.ctx, [`[${distance}m]`, xmin + boxWidth / 2, ymax + 14]);
+                this.ctx.font = "500 11px 'IBM Plex Mono', monospace"; this.ctx.fillStyle = "rgba(255,255,255,0.7)";
+                CRC2d.fillText.apply(this.ctx, [`${distance}m`, xmin + boxWidth / 2, ymax + 14]);
             }
             CRC2d.restore.apply(this.ctx, []);
         }
