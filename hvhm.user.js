@@ -71,6 +71,7 @@
             this.lastTargetChangeTime = 0;
             this.aimOffset = { x: 0, y: 0 };
             this.antiAimAngle = 0;
+            this._moveDirTable = [-3 * Math.PI / 4, -Math.PI / 2, -Math.PI / 4, 0, Math.PI / 4, Math.PI / 2, 3 * Math.PI / 4, Math.PI];
             this._chamsActive = false;
             this._chamsEntities = [];
             this._origFov = undefined;
@@ -144,6 +145,9 @@
             weaponChamsOpacity: 0.85,
                 antiAimSpinSpeed: 120,
                 antiAimJitter: true,
+                antiAimSpinEnabled: false,
+                airAntiAimEnabled: false,
+                antiAimLookDownPitch: -1.2,
             };
             this.defaultHotkeys = {
                 toggleMenu: 'Insert',
@@ -833,33 +837,73 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
                     this.resetLookAt();
                 }
                 if (this.settings.antiAimEnabled && !this.me.didShoot) {
-                    this.antiAimAngle += (this.settings.antiAimSpinSpeed * 0.001) * Math.PI * 2;
-                    if (this.antiAimAngle > Math.PI * 1000) this.antiAimAngle -= Math.PI * 1000;
-                    const aaY = this.settings.antiAimJitter ? (Math.random() - 0.5) * 1.2 : 0;
-                    inputPacket[gameInputIndices.xdir] = aaY * 1000;
-                    inputPacket[gameInputIndices.ydir] = this.antiAimAngle * 1000;
-                    if (!this.settings.superSilentEnabled) this.lookDir(aaY, this.antiAimAngle);
+                    this.applyAntiAim(inputPacket, gameInputIndices);
                 }
-            if (this.renderer?.fpsCamera) {
-                if (this.settings.fovChanger > 0) {
-                    if (this._origFov === undefined) this._origFov = this.renderer.camera.fov;
-                    this.renderer.fpsCamera.fov = this.settings.fovChanger;
-                    this.renderer.camera.fov = this.settings.fovChanger;
-                    this.renderer.fpsCamera.updateProjectionMatrix();
-                    this.renderer.camera.updateProjectionMatrix();
-                } else if (this._origFov !== undefined) {
-                    this.renderer.fpsCamera.fov = this._origFov;
-                    this.renderer.camera.fov = this._origFov;
-                    this.renderer.fpsCamera.updateProjectionMatrix();
-                    this.renderer.camera.updateProjectionMatrix();
-                    this._origFov = undefined;
+                if (this.renderer?.fpsCamera) {
+                    const cam = this.renderer.camera;
+                    const fps = this.renderer.fpsCamera;
+                    const aiming = this.me && this.me.aimVal > 0;
+                    if (this.settings.fovChanger > 0 && !aiming) {
+                        cam.fov = this.settings.fovChanger; cam.updateProjectionMatrix();
+                        fps.fov = this.settings.fovChanger; fps.updateProjectionMatrix();
+                    } else {
+                        const base = (this._baseFov !== undefined) ? this._baseFov : cam.fov;
+                        if (cam.fov !== base) { cam.fov = base; cam.updateProjectionMatrix(); }
+                        if (fps.fov !== base) { fps.fov = base; fps.updateProjectionMatrix(); }
+                    }
                 }
-            }
 
             } else if (this.me.weapon.nAuto && this.me.didShoot) {
                 inputPacket[gameInputIndices.shoot] = 0; inputPacket[gameInputIndices.scope] = 0;
                 this.me.inspecting = false; this.me.inspectX = 0;
             }
+        }
+
+        applyAntiAim(inputPacket, idx) {
+            const s = this.settings;
+            const me = this.me;
+            if (!me) return;
+            const inAir = !me.onGround;
+            const wantSpin = s.airAntiAimEnabled ? inAir : s.antiAimSpinEnabled;
+
+            if (wantSpin) {
+                this.antiAimAngle += (s.antiAimSpinSpeed * 0.001) * Math.PI * 2;
+                if (this.antiAimAngle > Math.PI * 1000) this.antiAimAngle -= Math.PI * 1000;
+                if (this.antiAimAngle < -Math.PI * 1000) this.antiAimAngle += Math.PI * 1000;
+                const spinYaw = this.antiAimAngle;
+                let spinPitch = 0;
+                if (s.antiAimJitter) spinPitch = (Math.random() - 0.5) * 0.4;
+                inputPacket[idx.ydir] = spinYaw * 1000;
+                inputPacket[idx.xdir] = spinPitch * 1000;
+                const realYaw = this.controls.object.rotation.y;
+                const localMove = me.moveDir;
+                if (localMove != null) {
+                    const neededLocal = localMove - realYaw + spinYaw;
+                    const moveIdx = this._nearestMoveDirIndex(neededLocal);
+                    if (moveIdx >= 0) inputPacket[idx.moveDir] = moveIdx;
+                }
+                if (!s.superSilentEnabled) this.lookDir(spinPitch, spinYaw);
+            } else {
+                const downPitch = (typeof s.antiAimLookDownPitch === 'number') ? s.antiAimLookDownPitch : -1.2;
+                let pitch = downPitch;
+                if (s.antiAimJitter) pitch += (Math.random() - 0.5) * 0.15;
+                const realYaw = this.controls.object.rotation.y;
+                inputPacket[idx.ydir] = realYaw * 1000;
+                inputPacket[idx.xdir] = pitch * 1000;
+                if (!s.superSilentEnabled) this.lookDir(pitch, realYaw);
+            }
+        }
+
+        _nearestMoveDirIndex(angle) {
+            const tbl = this._moveDirTable;
+            if (!tbl) return -1;
+            let best = -1, bestDiff = Infinity;
+            for (let i = 0; i < tbl.length; i++) {
+                const a = tbl[i];
+                const d = Math.abs(((angle - a + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+                if (d < bestDiff) { bestDiff = d; best = i; }
+            }
+            return best;
         }
 
         showGUI() {
@@ -1003,7 +1047,10 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
                 weaponChamsColor: 'Weapon chams color.',
                 weaponChamsOpacity: 'Weapon chams opacity.',
                 antiAimSpinSpeed: 'Anti-aim spin speed (desync rotation).',
-                antiAimJitter: 'Adds random vertical jitter to anti-aim.',
+                antiAimJitter: 'Adds subtle random wobble to anti-aim.',
+                antiAimSpinEnabled: 'Spinbot: continuously spins your yaw for anti-aim while keeping movement.',
+                airAntiAimEnabled: 'Aero anti-aim: spins in the air, applies look-down anti-aim on the ground.',
+                antiAimLookDownPitch: 'Pitch angle (radians) used by the look-down anti-aim.',
             };
 
             setTimeout(() => {
@@ -1073,7 +1120,10 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
             <div class="hvhm-section">Combat</div>
             ${this.createMenuItemHTML('toggle','antiAimEnabled','Anti-Aim', I.antiAim, tips.antiAimEnabled)}
             ${this.createMenuItemHTML('slider','antiAimSpinSpeed','Anti-Aim Spin', I.antiAim, tips.antiAimSpinSpeed, 1, 200, 1)}
-            ${this.createMenuItemHTML('toggle','antiAimJitter','Anti-Aim Jitter', I.antiAim, tips.antiAimJitter)}
+             ${this.createMenuItemHTML('toggle','antiAimJitter','Anti-Aim Jitter', I.antiAim, tips.antiAimJitter)}
+             ${this.createMenuItemHTML('toggle','antiAimSpinEnabled','Spinbot', I.antiAim, tips.antiAimSpinEnabled)}
+             ${this.createMenuItemHTML('toggle','airAntiAimEnabled','Aero Anti-Aim', I.antiAim, tips.airAntiAimEnabled)}
+             ${this.createMenuItemHTML('slider','antiAimLookDownPitch','Look-Down Angle', I.antiAim, tips.antiAimLookDownPitch, -1.55, 0, 0.05)}
             ${this.createMenuItemHTML('toggle','autoNuke','Auto Nuke', I.rocket, tips.autoNuke)}
             ${this.createMenuItemHTML('toggle','antikick','Anti Kick', I.antiKick, tips.antikick)}
             ${this.createMenuItemHTML('toggle','autoReload','Auto Reload', I.autoReload, tips.autoReload)}
