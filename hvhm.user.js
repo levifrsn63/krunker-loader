@@ -110,8 +110,10 @@
                 aimOffset: 0,
                 drawFovCircle: false,
                 espLines: true,
-                espSquare: true,
-                espNameTags: true,
+            espSquare: true,
+            espNameTags: true,
+            espWeapon: false,
+            espLevel: false,
                 espTeamCheck: true,
                 espBotCheck: true,
                 wireframeEnabled: false,
@@ -1026,7 +1028,8 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
                 fovSize:'FOV radius. 0 = full screen.', drawFovCircle:'Displays FOV circle.',
                 espTeamCheck:'No ESP for teammates.', espBotCheck:'ESP for AI/bots.',
                 espLines:'Line from bottom to enemies.', espSquare:'Box around enemies.',
-                espNameTags:'Name & distance only.', espColor:'ESP line color.',
+                 espNameTags:'Name & distance only.', espColor:'ESP line color.',
+                 espWeapon:'Draws a weapon icon above enemies.', espLevel:'Shows player level inside the name tag.',
                 boxColor:'Box & info color.', botColor:'Bot ESP color.',
                 wireframeEnabled:'Wireframe rendering.', unlockSkins:'Client-side skin unlocker.',
                 bhopEnabled:'Hold space auto-jump.', antiAimEnabled:'Makes you harder to hit.',
@@ -1094,7 +1097,9 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
             ${this.createMenuItemHTML('slider','fovChanger','FOV Changer (0=off)', I.fov, tips.fovChanger, 0, 160, 1)}
             ${this.createMenuItemHTML('toggle','espSquare','ESP Box', I.espSquare, tips.espSquare)}
             ${this.createMenuItemHTML('toggle','espLines','ESP Lines', I.line, tips.espLines)}
-            ${this.createMenuItemHTML('toggle','espNameTags','Name Tags', I.nameTags, tips.espNameTags)}
+             ${this.createMenuItemHTML('toggle','espNameTags','Name Tags', I.nameTags, tips.espNameTags)}
+             ${this.createMenuItemHTML('toggle','espWeapon','Weapon Icon', I.espSquare, tips.espWeapon)}
+             ${this.createMenuItemHTML('toggle','espLevel','Level', I.nameTags, tips.espLevel)}
             ${this.createMenuItemHTML('toggle','wireframeEnabled','Wireframe', I.wireframe, tips.wireframeEnabled)}
             ${this.createMenuItemHTML('toggle','chamsEnabled','Chams (Highlight)', I.palette, tips.chamsEnabled)}
             ${this.createMenuItemHTML('toggle','chamsThroughWalls','Chams Through Walls', I.wall, tips.chamsThroughWalls)}
@@ -1416,8 +1421,19 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
                 CRC2d.fillRect.apply(this.ctx, [barX, barY + barHeight * (1 - healthPercentage), barWidth, barHeight * healthPercentage]);
             }
 
+            if (this.settings.espWeapon) {
+                const iw = 16, ih = 9;
+                const ix = xmin + boxWidth / 2 - iw / 2;
+                const iy = ymin - 22;
+                this.ctx.fillStyle = col;
+                CRC2d.fillRect.apply(this.ctx, [ix + iw * 0.34, iy + ih * 0.15, iw * 0.62, ih * 0.28]);
+                CRC2d.fillRect.apply(this.ctx, [ix, iy + ih * 0.42, iw * 0.72, ih * 0.4]);
+                CRC2d.fillRect.apply(this.ctx, [ix + iw * 0.12, iy + ih * 0.72, iw * 0.2, ih * 0.55]);
+            }
+
             if (this.settings.espNameTags) {
-                const name = isBot ? (player.name || 'Bot') : (player.name || 'Player');
+                const lvl = (this.settings.espLevel && typeof player.level === 'number') ? ` [Lv${player.level}]` : '';
+                const name = (isBot ? (player.name || 'Bot') : (player.name || 'Player')) + lvl;
                 this.ctx.font = "600 12px 'IBM Plex Mono', monospace"; this.ctx.textAlign = "center"; this.ctx.shadowBlur = 0;
                 this.ctx.fillStyle = col;
                 CRC2d.fillText.apply(this.ctx, [name, xmin + boxWidth / 2, ymin - 6]);
