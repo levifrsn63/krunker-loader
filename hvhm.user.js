@@ -72,7 +72,9 @@
             this.aimOffset = { x: 0, y: 0 };
             this.antiAimAngle = 0;
             this._chamsActive = false;
+            this._chamsEntities = [];
             this._origFov = undefined;
+            this._baseFov = undefined;
             this._weaponChamsActive = false;
             this._rgbHue = 0;
 
@@ -449,16 +451,20 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
 
         onRenderFrame() {
             if (!this.three || !this.renderer?.camera || !this.me) return;
-            if (this.settings.fovChanger > 0 && this.renderer.camera) {
-                if (this._origFov === undefined) this._origFov = this.renderer.camera.fov;
-                this.renderer.camera.fov = this.settings.fovChanger;
-                this.renderer.camera.updateProjectionMatrix();
-                if (this.renderer.fpsCamera) { this.renderer.fpsCamera.fov = this.settings.fovChanger; this.renderer.fpsCamera.updateProjectionMatrix(); }
-            } else if (this._origFov !== undefined) {
-                this.renderer.camera.fov = this._origFov;
-                this.renderer.camera.updateProjectionMatrix();
-                if (this.renderer.fpsCamera) { this.renderer.fpsCamera.fov = this._origFov; this.renderer.fpsCamera.updateProjectionMatrix(); }
-                this._origFov = undefined;
+            const cam = this.renderer.camera;
+            const fps = this.renderer.fpsCamera;
+            const aiming = this.me && this.me.aimVal > 0;
+            if (cam) {
+                if (!aiming && this.settings.fovChanger === 0) this._baseFov = cam.fov;
+                if (this.settings.fovChanger > 0 && !aiming) {
+                    cam.fov = this.settings.fovChanger;
+                    cam.updateProjectionMatrix();
+                    if (fps) { fps.fov = this.settings.fovChanger; fps.updateProjectionMatrix(); }
+                } else {
+                    const base = (this._baseFov !== undefined) ? this._baseFov : cam.fov;
+                    if (cam.fov !== base) { cam.fov = base; cam.updateProjectionMatrix(); }
+                    if (fps && fps.fov !== base) { fps.fov = base; fps.updateProjectionMatrix(); }
+                }
             }
             if (this.settings.chamsEnabled || this.settings.weaponChamsEnabled || this._chamsActive || this._weaponChamsActive) { this.applyChams(); }
             if (this.me.procInputs && !this.me.procInputs[this.isProxy]) {
@@ -504,48 +510,21 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
         }
 
         applyChams() {
-            if (!this.renderer || !this.renderer.scene || !this.game || !this.game.players) return;
             const s = this.settings;
             const enabled = s.chamsEnabled;
-            const processObj = (obj, isEnemy) => {
-                if (!obj) return;
-                const col = s.rgbChams ? this._rgbChamsColor() : (isEnemy ? s.chamsEnemyColor : s.chamsTeamColor);
-                obj.traverse(child => {
-                    if (!child.isMesh || !child.material) return;
-                    if (!child.__hvhmOrigMat) child.__hvhmOrigMat = child.material;
-                    if (!child.__hvhmChamsMat) {
-                        child.__hvhmChamsMat = new this.three.MeshBasicMaterial({
-                            color: new this.three.Color(col),
-                            depthTest: s.chamsThroughWalls ? false : true,
-                            depthWrite: false,
-                            transparent: true,
-                            opacity: s.chamsOpacity,
-                            side: this.three.DoubleSide
-                        });
-                        child.__hvhmChamsMat.__isChams = true;
-                    } else {
-                        child.__hvhmChamsMat.color.set(col);
-                        child.__hvhmChamsMat.depthTest = s.chamsThroughWalls ? false : true;
-                        child.__hvhmChamsMat.opacity = s.chamsOpacity;
-                    }
-                    if (enabled) {
-                        child.material = child.__hvhmChamsMat;
-                        child.renderOrder = 9998;
-                        child.frustumCulled = false;
-                    } else {
-                        child.material = child.__hvhmOrigMat;
-                        child.renderOrder = 0;
-                    }
-                });
-            };
-            for (const p of this.game.players.list) {
-                if (p && p.active) {
-                    if (p.isYou && !s.chamsSelf) continue;
-                    processObj(p.objInstances || p.mesh, !this.isTeam(p));
+            const current = new Set();
+            if (enabled) {
+                const { entities, local } = this.getPlayerEntities();
+                for (const entity of entities) { if (entity) { current.add(entity); this._applyChamsToEntity(entity, false, s); } }
+                if (s.chamsSelf && local) { current.add(local); this._applyChamsToEntity(local, true, s); }
+                else if (local && local.__chamsApplied) this._removeChamsFromEntity(local);
+                if (s.espBotCheck && this.game.AI && this.game.AI.ais) {
+                    for (const b of this.game.AI.ais) { if (b && b.mesh) { current.add(b.mesh); this._applyChamsToEntity(b.mesh, true, s); } }
                 }
             }
-            if (s.espBotCheck && this.game.AI && this.game.AI.ais) {
-                for (const b of this.game.AI.ais) { if (b && b.mesh) processObj(b.mesh, true); }
+            for (let i = this._chamsEntities.length - 1; i >= 0; i--) {
+                const e = this._chamsEntities[i];
+                if (!current.has(e)) this._removeChamsFromEntity(e);
             }
             if (s.weaponChamsEnabled || this._weaponChamsActive) {
                 this.applyWeaponChams();
@@ -554,13 +533,117 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
             this._chamsActive = enabled;
         }
 
+        getPlayerEntities() {
+            const result = { entities: [], local: null };
+            const scene = this.renderer && this.renderer.scene;
+            const me = this.me;
+            const meObj = me ? (me.objInstances || me.mesh) : null;
+            const players = (this.game && this.game.players && this.game.players.list) || [];
+            const playerPositions = [];
+            for (const p of players) {
+                if (!p || !p.active) continue;
+                const o = p.objInstances || p.mesh;
+                if (o && o.position) playerPositions.push(o.position);
+            }
+            const seen = new Set();
+            const add = (e) => { if (e && !seen.has(e)) { seen.add(e); result.entities.push(e); } };
+            for (const p of players) {
+                if (!p || !p.active || p.isYou) continue;
+                add(p.objInstances || p.mesh);
+            }
+            if (scene) {
+                for (const entity of scene.children) {
+                    if (entity.type !== 'Object3D') continue;
+                    let isLocal = false;
+                    try {
+                        const camChild = entity.children && entity.children[0] && entity.children[0].children && entity.children[0].children[0];
+                        if (camChild && camChild.type === 'PerspectiveCamera') isLocal = true;
+                    } catch (e) {}
+                    if (isLocal) { if (!result.local) result.local = entity; continue; }
+                    for (const pos of playerPositions) {
+                        if (entity.position && pos && Math.abs(entity.position.x - pos.x) < 2 && Math.abs(entity.position.z - pos.z) < 2 && Math.abs(entity.position.y - pos.y) < 6) {
+                            add(entity); break;
+                        }
+                    }
+                }
+            }
+            if (meObj) {
+                const idx = result.entities.indexOf(meObj);
+                if (idx !== -1) result.entities.splice(idx, 1);
+                if (!result.local) result.local = meObj;
+            }
+            return result;
+        }
+
+        _resolveChamsColor(entity, isLocal, s) {
+            if (s.rgbChams) return this._rgbChamsColor();
+            if (isLocal) return new this.three.Color(s.chamsEnemyColor);
+            let team = null;
+            const players = (this.game && this.game.players && this.game.players.list) || [];
+            for (const p of players) {
+                if (p.objInstances === entity || p.mesh === entity) { team = p.team; break; }
+            }
+            const isEnemy = team === null || (this.me && team !== this.me.team);
+            return new this.three.Color(isEnemy ? s.chamsEnemyColor : s.chamsTeamColor);
+        }
+
+        _createChamsMaterial(s, entity, isLocal) {
+            const mat = new this.three.MeshBasicMaterial({
+                color: this._resolveChamsColor(entity, isLocal, s),
+                depthTest: s.chamsThroughWalls ? false : true,
+                depthWrite: false,
+                transparent: true,
+                opacity: s.chamsOpacity,
+                side: this.three.DoubleSide
+            });
+            mat.__isChams = true;
+            return mat;
+        }
+
+        _applyChamsToEntity(entity, isLocal, s) {
+            if (!entity) return;
+            if (entity.__chamsApplied) { this._updateChamsMaterials(entity, s, isLocal); return; }
+            const chamsMaterial = this._createChamsMaterial(s, entity, isLocal);
+            entity.traverse(child => {
+                if (!child.isMesh || !child.material) return;
+                if (!child.__originalMaterials) child.__originalMaterials = child.material;
+                child.material = chamsMaterial;
+                if (child.isModel) { child.renderOrder = 9998; child.frustumCulled = false; }
+            });
+            entity.__chamsApplied = true;
+            entity.__chamsMaterial = chamsMaterial;
+            this._chamsEntities.push(entity);
+        }
+
+        _updateChamsMaterials(entity, s, isLocal) {
+            const chamsMaterial = entity.__chamsMaterial;
+            if (!chamsMaterial) return;
+            chamsMaterial.color = this._resolveChamsColor(entity, isLocal, s);
+            chamsMaterial.opacity = s.chamsOpacity;
+            chamsMaterial.depthTest = s.chamsThroughWalls ? false : true;
+        }
+
+        _removeChamsFromEntity(entity) {
+            if (!entity) return;
+            entity.traverse(child => {
+                if (child.isMesh && child.__originalMaterials) {
+                    child.material = child.__originalMaterials;
+                    if (child.isModel) { child.renderOrder = 0; child.frustumCulled = true; }
+                }
+            });
+            entity.__chamsApplied = false;
+            entity.__chamsMaterial = null;
+            const idx = this._chamsEntities.indexOf(entity);
+            if (idx !== -1) this._chamsEntities.splice(idx, 1);
+        }
+
         _rgbChamsColor() {
             if (this._rgbHue === undefined) this._rgbHue = 0;
             this._rgbHue = (this._rgbHue + 0.02) % (Math.PI * 2);
             const r = Math.sin(this._rgbHue) * 0.5 + 0.5;
             const g = Math.sin(this._rgbHue + 2.094) * 0.5 + 0.5;
             const b = Math.sin(this._rgbHue + 4.188) * 0.5 + 0.5;
-            return `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`;
+            return new this.three.Color(r, g, b);
         }
 
         applyWeaponChams() {
