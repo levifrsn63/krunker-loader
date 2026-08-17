@@ -71,7 +71,7 @@
             this.lastTargetChangeTime = 0;
             this.aimOffset = { x: 0, y: 0 };
             this.antiAimAngle = 0;
-            this._chamsStore = new Map();
+            this._chamsActive = false;
             this._origFov = undefined;
             this._weaponChamsActive = false;
             this._rgbHue = 0;
@@ -460,7 +460,7 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
                 if (this.renderer.fpsCamera) { this.renderer.fpsCamera.fov = this._origFov; this.renderer.fpsCamera.updateProjectionMatrix(); }
                 this._origFov = undefined;
             }
-            if (this.settings.chamsEnabled || this.settings.weaponChamsEnabled || this._chamsStore.size || this._weaponChamsActive) { this.applyChams(); }
+            if (this.settings.chamsEnabled || this.settings.weaponChamsEnabled || this._chamsActive || this._weaponChamsActive) { this.applyChams(); }
             if (this.me.procInputs && !this.me.procInputs[this.isProxy]) {
                 const originalProcInputs = this.me.procInputs;
                 const _origProc = originalProcInputs;
@@ -507,45 +507,34 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
             if (!this.renderer || !this.renderer.scene || !this.game || !this.game.players) return;
             const s = this.settings;
             const enabled = s.chamsEnabled;
-            const baseCol = s.rgbChams ? this._rgbChamsColor() : null;
             const processObj = (obj, isEnemy) => {
                 if (!obj) return;
-                const col = s.rgbChams ? baseCol : (isEnemy ? s.chamsEnemyColor : s.chamsTeamColor);
+                const col = s.rgbChams ? this._rgbChamsColor() : (isEnemy ? s.chamsEnemyColor : s.chamsTeamColor);
                 obj.traverse(child => {
                     if (!child.isMesh || !child.material) return;
-                    const mats = Array.isArray(child.material) ? child.material : [child.material];
-                    for (const m of mats) {
-                        if (!this._chamsStore.has(m.uuid)) {
-                            this._chamsStore.set(m.uuid, {
-                                color: m.color ? m.color.clone() : null,
-                                emissive: m.emissive ? m.emissive.clone() : null,
-                                emissiveIntensity: m.emissiveIntensity || 0,
-                                depthTest: m.depthTest,
-                                depthWrite: m.depthWrite,
-                                transparent: m.transparent,
-                                opacity: m.opacity
-                            });
-                        }
-                        if (enabled) {
-                            if (m.color) m.color.set(col);
-                            if (m.emissive) { m.emissive.set(col); m.emissiveIntensity = 1; }
-                            if (s.chamsOpacity < 1) { m.transparent = true; m.opacity = s.chamsOpacity; }
-                            if (s.chamsThroughWalls) { m.depthTest = false; m.depthWrite = false; }
-                            m.needsUpdate = true;
-                        } else {
-                            const o = this._chamsStore.get(m.uuid);
-                            if (o) {
-                                if (o.color) m.color.copy(o.color);
-                                if (o.emissive) m.emissive.copy(o.emissive);
-                                m.emissiveIntensity = o.emissiveIntensity;
-                                m.depthTest = o.depthTest;
-                                m.depthWrite = o.depthWrite;
-                                m.transparent = o.transparent;
-                                m.opacity = o.opacity;
-                                m.needsUpdate = true;
-                            }
-                            this._chamsStore.delete(m.uuid);
-                        }
+                    if (!child.__hvhmOrigMat) child.__hvhmOrigMat = child.material;
+                    if (!child.__hvhmChamsMat) {
+                        child.__hvhmChamsMat = new this.three.MeshBasicMaterial({
+                            color: new this.three.Color(col),
+                            depthTest: s.chamsThroughWalls ? false : true,
+                            depthWrite: false,
+                            transparent: true,
+                            opacity: s.chamsOpacity,
+                            side: this.three.DoubleSide
+                        });
+                        child.__hvhmChamsMat.__isChams = true;
+                    } else {
+                        child.__hvhmChamsMat.color.set(col);
+                        child.__hvhmChamsMat.depthTest = s.chamsThroughWalls ? false : true;
+                        child.__hvhmChamsMat.opacity = s.chamsOpacity;
+                    }
+                    if (enabled) {
+                        child.material = child.__hvhmChamsMat;
+                        child.renderOrder = 9998;
+                        child.frustumCulled = false;
+                    } else {
+                        child.material = child.__hvhmOrigMat;
+                        child.renderOrder = 0;
                     }
                 });
             };
@@ -562,6 +551,7 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
                 this.applyWeaponChams();
                 this._weaponChamsActive = s.weaponChamsEnabled;
             }
+            this._chamsActive = enabled;
         }
 
         _rgbChamsColor() {
