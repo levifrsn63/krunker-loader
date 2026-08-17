@@ -72,6 +72,11 @@
             this.aimOffset = { x: 0, y: 0 };
             this.antiAimAngle = 0;
             this._moveDirTable = [-3 * Math.PI / 4, -Math.PI / 2, -Math.PI / 4, 0, Math.PI / 4, Math.PI / 2, 3 * Math.PI / 4, Math.PI];
+            this._tracers = [];
+            this._hitmarker = 0;
+            this._lastShoot = false;
+            this._origFirerate = undefined;
+            this._baseSpeedLmt = undefined;
             this._chamsActive = false;
             this._chamsEntities = [];
             this._origFov = undefined;
@@ -150,6 +155,18 @@
                 antiAimSpinEnabled: false,
                 airAntiAimEnabled: false,
                 antiAimLookDownPitch: -1.2,
+                noRecoil: false,
+                noSpread: false,
+                rapidFire: false,
+                infiniteAmmo: false,
+                instantReload: false,
+                godMode: false,
+                fly: false,
+                speedHack: false,
+                speedHackValue: 1.6,
+                recon: false,
+                bulletTracers: false,
+                hitmarkers: false,
             };
             this.defaultHotkeys = {
                 toggleMenu: 'Insert',
@@ -473,6 +490,7 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
                 }
             }
             if (this.settings.chamsEnabled || this.settings.weaponChamsEnabled || this._chamsActive || this._weaponChamsActive) { this.applyChams(); }
+            this.applyRage();
             if (this.me.procInputs && !this.me.procInputs[this.isProxy]) {
                 const originalProcInputs = this.me.procInputs;
                 const _origProc = originalProcInputs;
@@ -513,6 +531,102 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
             CRC2d.restore.apply(this.ctx, []);
             this.ctx.strokeStyle = original_strokeStyle; this.ctx.lineWidth = original_lineWidth;
             this.ctx.font = original_font; this.ctx.fillStyle = original_fillStyle;
+            this.drawRageVisuals();
+        }
+
+        applyRage() {
+            const s = this.settings;
+            const me = this.me;
+            if (!me) return;
+            if (me.noRecoil !== undefined) me.noRecoil = !!s.noRecoil;
+            if (s.noSpread) {
+                me.noSpread = true;
+                me.spread = 0;
+                if (me.weapon) { me.weapon.spread = 0; me.weapon.recoil = 0; }
+            } else if (me.noSpread !== undefined) {
+                me.noSpread = false;
+            }
+            if (me.godMode !== undefined) me.godMode = !!s.godMode;
+            if (me.recon !== undefined) me.recon = !!s.recon;
+            me.noclip = !!s.fly;
+            if (s.infiniteAmmo && me.ammos) {
+                for (const k in me.ammos) { if (me.ammos.hasOwnProperty(k)) me.ammos[k] = 9999; }
+            }
+            if (s.instantReload && me.reloadTimer > 0) me.reloadTimer = 0;
+            if (me.weapon) {
+                if (s.rapidFire) {
+                    if (this._origFirerate === undefined) this._origFirerate = me.weapon.firerate;
+                    me.weapon.firerate = 0.04;
+                } else if (this._origFirerate !== undefined && me.weapon.firerate !== this._origFirerate) {
+                    me.weapon.firerate = this._origFirerate;
+                }
+            }
+            if (s.speedHack) {
+                if (this._baseSpeedLmt === undefined) this._baseSpeedLmt = me.speedLmt || 1;
+                me.speedLmt = (this._baseSpeedLmt || 1) * (s.speedHackValue || 1.6);
+            } else {
+                this._baseSpeedLmt = me.speedLmt || 1;
+            }
+        }
+
+        spawnTracer() {
+            const cam = this.renderer && this.renderer.fpsCamera;
+            if (!cam) return;
+            const start = cam.getWorldPosition(new this.three.Vector3());
+            const dir = new this.three.Vector3();
+            cam.getWorldDirection(dir);
+            const end = start.clone().add(dir.multiplyScalar(400));
+            const s = this.world2Screen({ x: start.x, y: start.y, z: start.z });
+            const e = this.world2Screen({ x: end.x, y: end.y, z: end.z });
+            if (s && e) this._tracers.push({ x1: s.x, y1: s.y, x2: e.x, y2: e.y, t: performance.now() });
+        }
+
+        checkHitmarker() {
+            if (!this.rayC || !this.renderer || !this.renderer.fpsCamera || !this.game || !this.game.players) return;
+            this.rayC.setFromCamera(this.vec2, this.renderer.fpsCamera);
+            this.playerMaps.length = 0;
+            this.playerMaps = this.game.players.list.map(p => p.objInstances).filter(Boolean);
+            if (this.containsPoint) {
+                const hit = this.rayC.intersectObjects(this.playerMaps, true);
+                if (hit && hit.length) this._hitmarker = performance.now();
+            }
+        }
+
+        drawRageVisuals() {
+            const now = performance.now();
+            const ctx = this.ctx;
+            if (this._tracers.length) {
+                CRC2d.save.apply(ctx, []);
+                for (let i = this._tracers.length - 1; i >= 0; i--) {
+                    const t = this._tracers[i];
+                    const age = now - t.t;
+                    if (age > 120) { this._tracers.splice(i, 1); continue; }
+                    const a = 1 - age / 120;
+                    ctx.strokeStyle = 'rgba(255,255,255,' + a.toFixed(3) + ')';
+                    ctx.lineWidth = 1.5;
+                    CRC2d.beginPath.apply(ctx, []);
+                    CRC2d.moveTo.apply(ctx, [t.x1, t.y1]);
+                    CRC2d.lineTo.apply(ctx, [t.x2, t.y2]);
+                    CRC2d.stroke.apply(ctx, []);
+                }
+                CRC2d.restore.apply(ctx, []);
+            }
+            if (this._hitmarker && now - this._hitmarker < 120) {
+                const cx = this.overlay.canvas.width / 2;
+                const cy = this.overlay.canvas.height / 2;
+                const sz = 8;
+                const a = 1 - (now - this._hitmarker) / 120;
+                ctx.strokeStyle = 'rgba(255,80,80,' + a.toFixed(3) + ')';
+                ctx.lineWidth = 2;
+                CRC2d.save.apply(ctx, []);
+                CRC2d.beginPath.apply(ctx, []);
+                CRC2d.moveTo.apply(ctx, [cx - sz, cy - sz]); CRC2d.lineTo.apply(ctx, [cx - sz + 4, cy - sz + 4]);
+                CRC2d.moveTo.apply(ctx, [cx + sz, cy - sz]); CRC2d.lineTo.apply(ctx, [cx + sz - 4, cy - sz + 4]);
+                CRC2d.moveTo.apply(ctx, [cx - sz, cy + sz]); CRC2d.lineTo.apply(ctx, [cx - sz + 4, cy + sz - 4]);
+                CRC2d.moveTo.apply(ctx, [cx + sz, cy + sz]); CRC2d.lineTo.apply(ctx, [cx + sz - 4, cy + sz - 4]);
+                CRC2d.stroke.apply(ctx, []);
+                CRC2d.restore.apply(ctx, []);
+            }
         }
 
         applyChams() {
@@ -698,6 +812,13 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
 
         onProcessInputs(inputPacket, player) {
             const gameInputIndices = { frame: 0, delta: 1, xdir: 2, ydir: 3, moveDir: 4, shoot: 5, scope: 6, jump: 7, reload: 8, crouch: 9, weaponScroll: 10, weaponSwap: 11, moveLock: 12 };
+
+            const _shootingNow = !!inputPacket[gameInputIndices.shoot];
+            if (_shootingNow && !this._lastShoot) {
+                if (this.settings.bulletTracers) this.spawnTracer();
+                if (this.settings.hitmarkers) this.checkHitmarker();
+            }
+            this._lastShoot = _shootingNow;
 
             if (this.settings.bhopEnabled && this.pressedKeys.has('Space')) {
                 this.controls.keys[this.controls.binds.jump.val] ^= 1;
@@ -920,10 +1041,10 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
             document.head.appendChild(fontLink);
 
             const menuCSS = `
-.hvhm-menu-container{position:fixed!important;top:14px!important;left:50%!important;transform:translateX(-50%)!important;width:400px!important;max-width:94vw!important;max-height:86vh!important;background:#000!important;border:1px solid rgba(255,255,255,0.1)!important;border-radius:12px!important;box-shadow:0 16px 50px rgba(0,0,0,0.6)!important;color:#f5f5f5!important;font-family:'Instrument Sans','Segoe UI',system-ui,sans-serif!important;overflow:hidden!important;display:flex!important;flex-direction:column!important;}
+.hvhm-menu-container{position:fixed!important;top:14px!important;left:50%!important;transform:translateX(-50%)!important;width:480px!important;max-width:96vw!important;max-height:74vh!important;background:#000!important;border:1px solid rgba(255,255,255,0.1)!important;border-radius:12px!important;box-shadow:0 16px 50px rgba(0,0,0,0.6)!important;color:#f5f5f5!important;font-family:'Instrument Sans','Segoe UI',system-ui,sans-serif!important;overflow:hidden!important;display:flex!important;flex-direction:column!important;}
 .hvhm-menu{display:flex!important;flex-direction:column!important;width:100%!important;height:100%!important;}
 .hvhm-tab-container{display:flex!important;flex-direction:row!important;background:#0a0a0a!important;border-bottom:1px solid rgba(255,255,255,0.08)!important;flex-shrink:0!important;border-radius:12px 12px 0 0!important;}
-.hvhm-tab{flex:1!important;text-align:center!important;padding:10px 4px!important;cursor:pointer!important;color:rgba(255,255,255,0.4)!important;text-transform:uppercase!important;letter-spacing:1.5px!important;font-weight:600!important;font-size:11px!important;border-right:1px solid rgba(255,255,255,0.06)!important;user-select:none!important;transition:color .15s,background .15s!important;}
+.hvhm-tab{flex:1!important;text-align:center!important;padding:8px 4px!important;cursor:pointer!important;color:rgba(255,255,255,0.4)!important;text-transform:uppercase!important;letter-spacing:1.5px!important;font-weight:600!important;font-size:11px!important;border-right:1px solid rgba(255,255,255,0.06)!important;user-select:none!important;transition:color .15s,background .15s!important;}
 .hvhm-tab:last-child{border-right:none!important;}
 .hvhm-tab:hover{color:rgba(255,255,255,0.7)!important;background:rgba(255,255,255,0.03)!important;}
 .hvhm-tab.active{background:#0a0a0a!important;color:#fff!important;box-shadow:inset 0 -2px 0 #fff!important;}
@@ -932,7 +1053,7 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
 .hvhm-tab-pane.active{display:flex!important;}
 .hvhm-section{width:100%!important;font-weight:600!important;color:rgba(255,255,255,0.4)!important;text-transform:uppercase!important;font-size:10px!important;letter-spacing:1.2px!important;padding:12px 14px 4px!important;border-top:1px solid rgba(255,255,255,0.06)!important;}
 .hvhm-section:first-child{border-top:none!important;padding-top:6px!important;}
-.hvhm-menu-item{display:flex!important;flex-direction:row!important;align-items:center!important;justify-content:space-between!important;width:100%!important;min-width:0!important;box-sizing:border-box!important;padding:9px 14px!important;background:transparent!important;border:none!important;border-bottom:1px solid rgba(255,255,255,0.06)!important;cursor:pointer!important;transition:background .12s!important;}
+.hvhm-menu-item{display:flex!important;flex-direction:row!important;align-items:center!important;justify-content:space-between!important;width:100%!important;min-width:0!important;box-sizing:border-box!important;padding:7px 14px!important;background:transparent!important;border:none!important;border-bottom:1px solid rgba(255,255,255,0.06)!important;cursor:pointer!important;transition:background .12s!important;}
 .hvhm-menu-item:hover{background:rgba(255,255,255,0.04)!important;}
 .hvhm-menu-item-content{display:flex!important;align-items:center!important;gap:9px!important;color:#f5f5f5!important;min-width:0!important;}
 .hvhm-menu-item-icon{width:15px!important;height:15px!important;fill:rgba(255,255,255,0.55)!important;flex-shrink:0!important;}
@@ -1030,6 +1151,7 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
                 espLines:'Line from bottom to enemies.', espSquare:'Box around enemies.',
                  espNameTags:'Name & distance only.', espColor:'ESP line color.',
                  espWeapon:'Draws a weapon icon above enemies.', espLevel:'Shows player level inside the name tag.',
+noRecoil:'Removes weapon recoil.', noSpread:'Removes weapon spread.', rapidFire:'Massively increases fire rate.', infiniteAmmo:'Keeps your ammo at 9999.', instantReload:'Skips the reload timer.', godMode:'Prevents all incoming damage.', fly:'Lets you fly by looking and moving (noclip).', speedHack:'Multiplies your movement speed.', speedHackValue:'Movement speed multiplier.', recon:'Grants the recon/ghost vision perk.', bulletTracers:'Draws tracers when you shoot.', hitmarkers:'Shows a hitmarker when you damage a player.',
                 boxColor:'Box & info color.', botColor:'Bot ESP color.',
                 wireframeEnabled:'Wireframe rendering.', unlockSkins:'Client-side skin unlocker.',
                 bhopEnabled:'Hold space auto-jump.', antiAimEnabled:'Makes you harder to hit.',
@@ -1066,6 +1188,7 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
         <div class="hvhm-tab active" data-tab="aimbot">Aimbot</div>
         <div class="hvhm-tab" data-tab="esp">ESP</div>
         <div class="hvhm-tab" data-tab="misc">Misc</div>
+        <div class="hvhm-tab" data-tab="beta">Beta</div>
     </div>
     <div class="hvhm-menu-body">
         <div class="hvhm-tab-pane active" id="hvhm-tab-aimbot">
@@ -1134,6 +1257,23 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
             ${this.createMenuItemHTML('toggle','autoReload','Auto Reload', I.autoReload, tips.autoReload)}
             <div class="hvhm-section">Other</div>
             ${this.createMenuItemHTML('toggle','unlockSkins','Unlock All Skins', I.unlockSkins, tips.unlockSkins)}
+        </div>
+        <div class="hvhm-tab-pane" id="hvhm-tab-beta">
+            <div class="hvhm-section">Weapon</div>
+            ${this.createMenuItemHTML('toggle','noRecoil','No Recoil', I.antiAim, tips.noRecoil)}
+            ${this.createMenuItemHTML('toggle','noSpread','No Spread', I.espSquare, tips.noSpread)}
+            ${this.createMenuItemHTML('toggle','rapidFire','Rapid Fire', I.autoFire, tips.rapidFire)}
+            ${this.createMenuItemHTML('toggle','infiniteAmmo','Infinite Ammo', I.rocket, tips.infiniteAmmo)}
+            ${this.createMenuItemHTML('toggle','instantReload','Instant Reload', I.autoReload, tips.instantReload)}
+            <div class="hvhm-section">Player</div>
+            ${this.createMenuItemHTML('toggle','godMode','God Mode', I.rocket, tips.godMode)}
+            ${this.createMenuItemHTML('toggle','fly','Fly (Noclip)', I.bounce, tips.fly)}
+            ${this.createMenuItemHTML('toggle','speedHack','Speed Hack', I.bounce, tips.speedHack)}
+            ${this.createMenuItemHTML('slider','speedHackValue','Speed Multiplier', I.bounce, tips.speedHackValue, 1, 5, 0.1)}
+            ${this.createMenuItemHTML('toggle','recon','Recon (Ghost)', I.robot, tips.recon)}
+            <div class="hvhm-section">Visual</div>
+            ${this.createMenuItemHTML('toggle','bulletTracers','Bullet Tracers', I.line, tips.bulletTracers)}
+            ${this.createMenuItemHTML('toggle','hitmarkers','Hitmarkers', I.aimbot, tips.hitmarkers)}
         </div>
     </div>
 </div>
