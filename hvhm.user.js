@@ -105,7 +105,7 @@
                 autoFireEnabled: false,
                 fovSize: 90,
                 aimOffset: 0,
-                drawFovCircle: true,
+                drawFovCircle: false,
                 espLines: true,
                 espSquare: true,
                 espNameTags: true,
@@ -140,7 +140,7 @@
             weaponChamsEnabled: false,
             weaponChamsColor: "#ff00ff",
             weaponChamsOpacity: 0.85,
-                antiAimSpinSpeed: 50,
+                antiAimSpinSpeed: 120,
                 antiAimJitter: true,
             };
             this.defaultHotkeys = {
@@ -749,7 +749,7 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
                 if (!this.settings.superSilentEnabled && !this.settings.antiAimEnabled) {
                     this.resetLookAt();
                 }
-                if (this.settings.antiAimEnabled && !this.me.didShoot && this.me.aimVal !== 0) {
+                if (this.settings.antiAimEnabled && !this.me.didShoot) {
                     this.antiAimAngle += (this.settings.antiAimSpinSpeed * 0.001) * Math.PI * 2;
                     if (this.antiAimAngle > Math.PI * 1000) this.antiAimAngle -= Math.PI * 1000;
                     const aaY = this.settings.antiAimJitter ? (Math.random() - 0.5) * 1.2 : 0;
@@ -946,6 +946,7 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
             ${this.createMenuItemHTML('toggle','aimbotWallBangs','Wall Bangs', I.wallOff, tips.aimbotWallBangs)}
             ${this.createMenuItemHTML('toggle','autoFireEnabled','Auto Fire', I.autoFire, tips.autoFireEnabled)}
             ${this.createMenuItemHTML('slider','fovSize','FOV Size', I.fov, tips.fovSize, 0, 1000, 1)}
+            ${this.createMenuItemHTML('toggle','drawFovCircle','FOV Circle', I.fov, tips.drawFovCircle)}
             <div class="hvhm-section">Legit</div>
             ${this.createMenuItemHTML('toggle','legitAimbot','Legit Aimbot', I.aimbot, tips.legitAimbot)}
             ${this.createMenuItemHTML('slider','flickSpeed','Flick Speed', I.aimbot, tips.flickSpeed, 0, 100, 1)}
