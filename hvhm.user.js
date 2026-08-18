@@ -15,7 +15,7 @@
 // @exclude          *://krunker.io/social*
 // @exclude          *://krunker.io/editor*
 // @exclude          *://krunker.io/viewer*
-// @icon             
+// @icon
 // @grant            none
 // @supportURL       https://github.com/hvhm/hvhm/issues/new?labels=bug&type=bug&template=bug_report.md&title=Bug+Report
 // @homepage         https://github.com/hvhm/hvhm
@@ -81,13 +81,6 @@
             this._lastShoot = false;
             this._origFirerate = undefined;
             this._baseSpeedLmt = undefined;
-            this.scriptId = localStorage.getItem('hvhm_sid') || (function () { let s = ''; const c = 'abcdefghijklmnopqrstuvwxyz0123456789'; for (let i = 0; i < 6; i++) s += c[Math.floor(Math.random() * c.length)]; localStorage.setItem('hvhm_sid', s); return s; })();
-            this.scriptUsers = {};
-            this.allies = {};
-            this.pendingRequests = {};
-            this._scriptNetReady = false;
-            this._lastBeacon = 0;
-            this._lastScriptPrune = 0;
             this._chamsActive = false;
             this._chamsEntities = [];
             this._chamsLODState = null;
@@ -100,6 +93,10 @@
             this._lastDeathCount = null;
             this._lastKillStreak = null;
             this._soundContext = null;
+            this.scriptId = localStorage.getItem('hvhm_sid') || (() => { const c = 'abcdefghijklmnopqrstuvwxyz0123456789'; let s = ''; for (let i = 0; i < 8; i++) s += c[Math.floor(Math.random() * c.length)]; localStorage.setItem('hvhm_sid', s); return s; })();
+            this.scriptUsers = new Map();
+            this._scriptObserver = null;
+            this._lastHvhmBeacon = 0;
 
             this.lastWireframeState = null;
 
@@ -150,6 +147,7 @@
                 bhopEnabled: false,
                 antiAimEnabled: false,
                 antiAimSpinEnabled: false,
+                scriptNetEnabled: true,
             espColor: "#ffffff",
             boxColor: "#ffffff",
             esp3DBoxColor: "#ffffff",
@@ -167,7 +165,6 @@
             espDistanceVisibleColor: "#ffffff",
             espBoxVisibleColor: "#ffffff",
             espDistance: true,
-            visibleTargetAlert: true,
             skeletonESP: false,
             skeletonColor: "#ffffff",
             skeletonVisibleColor: "#ffffff",
@@ -198,7 +195,6 @@
                 thirdPersonEnabled: false,
                 alwaysTrail: false,
             fovChanger: 0,
-            sniperNativeFov: true,
             chamsEnabled: false,
             chamsMode: "static",
             chamsColor: "#ff0000",
@@ -209,17 +205,6 @@
                 noRecoil: false,
                 bulletTracers: false,
                 hitmarkers: false,
-                noSpread: false,
-                rapidFire: false,
-                infiniteAmmo: false,
-                instantReload: false,
-                godMode: false,
-                fly: false,
-                speedHack: false,
-                speedHackValue: 1.6,
-                recon: false,
-                scriptNetEnabled: true,
-                scriptNetAutoTeam: false,
                 customSoundPack: 'off',
                 onlineSoundPackUrl: '',
             };
@@ -256,7 +241,7 @@
                     this.initGameGUI();
                 });
                 this.addEventListeners();
-    
+
             console.log("hvhm: Successfully Initialized! build 1.9.9-raised-skeleton-arms");
             } catch (error) {
                 console.error('hvhm: FATAL ERROR during initialization.', error);
@@ -613,12 +598,21 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
                             this.send = function (type, ...message) {
                                 if (type == "ah2") return; let data = message[0];
                                 if (type === 'en' && data) { cheatInstance.skinCache = { main: data[2][0], secondary: data[2][1], hat: data[3], body: data[4], knife: data[9], dye: data[14], waist: data[17], playerCard: data[32] }; }
-                                if (cheatInstance.settings.unlockSkins && type === 'spry' && data && data !== 4577) { cheatInstance.skinCache.spray = data; message[0] = 4577; }
+                                if (cheatInstance.settings.unlockSkins && type === '0' && Array.isArray(message[0])) cheatInstance.patchLocalCosmeticPacket(message[0]);
+                                if (cheatInstance.settings.unlockSkins && type === 'spry' && data && data !== 4577) { cheatInstance.skinCache.spray = data; }
                                 return _origSend.apply(this, [type, ...message]);
                             };
                             try { this.send[cheatInstance.isProxy] = true; } catch (e) {}
                             const _origDispatch = this._dispatchEvent;
                             this._dispatchEvent = function (eventName, ...eventData) {
+                                if (eventName === 'ct' || eventName === 'chat') {
+                                    const scan = value => {
+                                        if (typeof value === 'string' && value.indexOf('HVHM|') !== -1) cheatInstance.handleHvhmText(value);
+                                        else if (Array.isArray(value)) value.forEach(scan);
+                                        else if (value && typeof value === 'object') ['text','message','msg','chat','content'].forEach(k => scan(value[k]));
+                                    };
+                                    eventData.forEach(scan);
+                                }
                                 if (eventName === 'error' && eventData[0][0].includes('Connection Banned')) { localStorage.removeItem('krunker_token'); cheatInstance.notify({ title: 'Banned', message: 'Due to a ban, you have been signed out.\nPlease connect to the game with a VPN.', timeout: 5000 }); }
                                 if (cheatInstance.settings.unlockSkins && eventName === '0') cheatInstance.patchLocalCosmeticPacket(eventData[0][0]);
                                 if (cheatInstance.settings.unlockSkins && eventName === 'sp') { eventData[0][1] = cheatInstance.skinCache.spray; }
@@ -648,7 +642,7 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
             if (this.settings.chamsEnabled || this._chamsActive) { this.applyChams(); }
             this.update3DESP();
             this.applyRage();
-            this.updateScriptNet(performance.now());
+            this.updateHvhmDetection(performance.now());
             if (this.me.procInputs && !this.me.procInputs[this.isProxy]) {
                 const originalProcInputs = this.me.procInputs;
                 const _origProc = originalProcInputs;
@@ -686,53 +680,79 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
                         continue;
                     }
                     this.drawCanvasESP(player, false, false);
+                    this.drawHvhmUserTag(player);
                 }
             }
             if (this.settings.espBotCheck && this.game?.AI?.ais) { for (const bot of this.game.AI.ais) { if (!bot.mesh || !bot.mesh.visible || bot.health <= 0) continue; this.drawCanvasESP(bot, true); } }
-            if (this.settings.visibleTargetAlert) this.drawVisibleTargetAlert();
             CRC2d.restore.apply(this.ctx, []);
             this.ctx.strokeStyle = original_strokeStyle; this.ctx.lineWidth = original_lineWidth;
             this.ctx.font = original_font; this.ctx.fillStyle = original_fillStyle;
             this.drawRageVisuals();
         }
 
-        getVisibleTargetAlert() {
-            const players = this.game?.players?.list || [];
-            const visible = [];
-            for (const player of players) {
-                if (!player || player.isYou || !player.active || player.health <= 0) continue;
-                if (this.settings.espTeamCheck && this.isTeam(player)) continue;
-                const distance = Math.sqrt(this.getDistanceSq(this.me, player));
-                if (distance <= 0 || distance > 180) continue;
-                if (this.getCanSee(player)) visible.push({ player, distance });
-            }
-            visible.sort((a, b) => a.distance - b.distance);
-            return visible[0] || null;
+        handleHvhmText(value) {
+            const text = String(value || '');
+            const match = text.match(/HVHM\|net\|([a-z0-9]+)(?:\|([^\s|]+))?/i);
+            if (!match || match[1].toLowerCase() === this.scriptId.toLowerCase()) return;
+            const scriptId = match[1].toLowerCase();
+            const playerId = match[2] ? String(match[2]) : scriptId;
+            this.scriptUsers.set(playerId, { scriptId, lastSeen: performance.now() });
         }
 
-        drawVisibleTargetAlert() {
-            const target = this.getVisibleTargetAlert();
-            if (!target) return;
-            const canvas = this.overlay?.canvas;
-            if (!canvas) return;
-            const name = String(target.player.name || 'PLAYER').slice(0, 20);
-            const distance = `${Math.round(target.distance / 10)}m`;
-            const text = `VISIBLE TARGET  ${name}  ·  ${distance}`;
+        _hvhmPlayerId(player) {
+            if (!player) return '';
+            return String(player.id ?? player.socketId ?? player.sid ?? '');
+        }
+
+        drawHvhmUserTag(player) {
+            if (!this.settings.scriptNetEnabled || !player || player.isYou || !player.active || player.health <= 0) return;
+            const playerId = this._hvhmPlayerId(player);
+            if (!playerId || !this.scriptUsers.has(playerId)) return;
+            const height = (player.height || this.PLAYER_HEIGHT) - ((player.crouchVal || 0) * this.CROUCH_FACTOR);
+            const half = this.PLAYER_WIDTH / 2;
+            const points = [
+                {x: player.x-half, y: player.y, z: player.z-half},
+                {x: player.x+half, y: player.y, z: player.z+half},
+                {x: player.x-half, y: player.y+height, z: player.z-half},
+                {x: player.x+half, y: player.y+height, z: player.z+half}
+            ].map(p => this.world2Screen(p)).filter(Boolean);
+            if (points.length < 2) return;
+            const xs = points.map(p => p.x), ys = points.map(p => p.y);
+            const xmin = Math.min(...xs), xmax = Math.max(...xs), ymin = Math.min(...ys), ymax = Math.max(...ys);
             const ctx = this.ctx;
             ctx.save();
-            ctx.font = "600 12px 'IBM Plex Mono', monospace";
-            ctx.textAlign = 'center';
-            const width = ctx.measureText(text).width + 24;
-            const x = canvas.width / 2;
-            const y = 26;
-            ctx.fillStyle = 'rgba(12,12,12,0.82)';
-            ctx.fillRect(x - width / 2, y - 16, width, 24);
+            ctx.shadowBlur = 0;
             ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 1;
-            ctx.strokeRect(x - width / 2, y - 16, width, 24);
+            ctx.lineWidth = 2;
+            ctx.strokeRect(xmin, ymin, xmax - xmin, ymax - ymin);
+            ctx.font = '600 11px Arial, sans-serif';
+            ctx.textAlign = 'center';
+            const label = 'HVHM USER';
+            const labelY = Math.max(12, ymin - 5);
+            const w = ctx.measureText(label).width + 8;
+            ctx.fillStyle = 'rgba(0,0,0,0.78)';
+            ctx.fillRect((xmin + xmax - w) / 2, labelY - 11, w, 14);
             ctx.fillStyle = '#ffffff';
-            ctx.fillText(text, x, y);
+            ctx.fillText(label, (xmin + xmax) / 2, labelY);
             ctx.restore();
+        }
+
+        updateHvhmDetection(now) {
+            if (!this.settings.scriptNetEnabled) return;
+            if (!this._scriptObserver && typeof MutationObserver !== 'undefined' && document.body) {
+                this._scriptObserver = new MutationObserver(muts => muts.forEach(m => m.addedNodes.forEach(n => {
+                    const text = n && n.textContent;
+                    if (text && text.indexOf('HVHM|') !== -1) this.handleHvhmText(text);
+                })));
+                this._scriptObserver.observe(document.body, { childList: true, subtree: true });
+            }
+            if (this.wsSend && now - this._lastHvhmBeacon > 4000 && this.me && this.game && this.game.gameState !== 4 && this.game.gameState !== 5) {
+                const playerId = this._hvhmPlayerId(this.me);
+                try { this.wsSend('ct', 0, 'HVHM|net|' + this.scriptId + '|' + playerId); } catch (e) {}
+                this._lastHvhmBeacon = now;
+            }
+            const cutoff = now - 15000;
+            for (const [id, entry] of this.scriptUsers) if (entry.lastSeen < cutoff) this.scriptUsers.delete(id);
         }
 
         isThirdPersonView() {
@@ -811,6 +831,22 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
                 wristIndex: 'wristIndex',
                 playerCardIndex: 'playerCardIndex'
             };
+            if (!this.me._hvhmCosmeticWrapped) {
+                const _origUpdateItems = this.me.updateItems;
+                const self = this;
+                if (typeof _origUpdateItems === 'function') {
+                    this.me.updateItems = function (...args) {
+                        if (self.settings.unlockSkins) {
+                            for (const [field, storageKey] of Object.entries(fields)) {
+                                const sel = readSaved(storageKey);
+                                if (sel !== undefined) this[field] = sel;
+                            }
+                        }
+                        return _origUpdateItems.apply(this, args);
+                    };
+                    this.me._hvhmCosmeticWrapped = true;
+                }
+            }
             let changed = false;
             for (const [field, storageKey] of Object.entries(fields)) {
                 const selected = readSaved(storageKey);
@@ -971,150 +1007,6 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
             }
         }
 
-        initScriptNet() {
-            if (this._scriptNetReady) return;
-            this._scriptNetReady = true;
-            const self = this;
-            const probe = (root) => {
-                if (!root) return;
-                const walk = (node) => {
-                    if (node.nodeType === 1) {
-                        if (node.textContent && node.textContent.indexOf('HVHM|') !== -1) { self.handleScriptChatNode(node); return; }
-                    } else if (node.nodeType === 3) {
-                        if (node.textContent && node.textContent.indexOf('HVHM|') !== -1) { self.handleScriptChatNode(node); }
-                    }
-                };
-                walk(root);
-            };
-            try {
-                this._scriptObserver = new MutationObserver((muts) => {
-                    for (const m of muts) { for (const n of m.addedNodes) probe(n); }
-                });
-                this._scriptObserver.observe(document.body, { childList: true, subtree: true });
-            } catch (e) {}
-        }
-
-        handleScriptChatNode(node) {
-            const txt = (node.textContent || '').trim();
-            if (txt.indexOf('HVHM|') === -1) return;
-            let m;
-            if ((m = txt.match(/^HVHM\|net\|([a-z0-9]+)/)) || (m = txt.match(/HVHM\|net\|([a-z0-9]+)/))) {
-                node.style && (node.style.display = 'none');
-                this.registerScriptUser(m[1]);
-                return;
-            }
-            if ((m = txt.match(/HVHM\|req\|([a-z0-9]+)\|([a-z0-9]+)/))) {
-                node.style && (node.style.display = 'none');
-                const from = m[1], to = m[2];
-                if (to === this.scriptId) this.onTeamRequest(from);
-                return;
-            }
-            if ((m = txt.match(/HVHM\|ack\|([a-z0-9]+)\|([a-z0-9]+)/))) {
-                node.style && (node.style.display = 'none');
-                const a = m[1], b = m[2];
-                if (b === this.scriptId) this.addAlly(a);
-                return;
-            }
-        }
-
-        registerScriptUser(id) {
-            if (id === this.scriptId) return;
-            this.scriptUsers[id] = { lastSeen: performance.now() };
-        }
-
-        updateScriptNet(now) {
-            if (!this.settings.scriptNetEnabled) { if (this._scriptObserver) { try { this._scriptObserver.disconnect(); } catch (e) {} this._scriptObserver = null; } this._scriptNetReady = false; return; }
-            if (!this._scriptNetReady) this.initScriptNet();
-            if (now - this._lastBeacon > 5000 && this.me && this.game && this.game.gameState !== 4 && this.game.gameState !== 5 && this.wsSend) {
-                try { this.wsSend('ct', 0, 'HVHM|net|' + this.scriptId); } catch (e) {}
-                this._lastBeacon = now;
-            }
-            if (now - this._lastScriptPrune > 2000) {
-                this._lastScriptPrune = now;
-                const cut = now - 15000;
-                for (const id in this.scriptUsers) { if (this.scriptUsers[id].lastSeen < cut) delete this.scriptUsers[id]; }
-            }
-            if (this._lastPanelRefresh === undefined) this._lastPanelRefresh = 0;
-            const panelEl = document.getElementById('hvhm-script-panel');
-            if (panelEl && panelEl.offsetParent !== null && now - this._lastPanelRefresh > 1000) {
-                this._lastPanelRefresh = now; this.refreshScriptPanel();
-            }
-        }
-
-        onTeamRequest(fromId) {
-            if (this.allies[fromId]) { this.sendTeamAck(fromId); return; }
-            this.pendingRequests[fromId] = { fromId: fromId, t: performance.now() };
-            if (this.settings.scriptNetAutoTeam) { this.acceptTeamRequest(fromId); return; }
-            this.notify({ title: 'Team Up', message: 'Another HVHM user wants to team up.', timeout: 4000 });
-        }
-
-        sendTeamRequest(targetId) {
-            if (!this.wsSend || !targetId) return;
-            try { this.wsSend('ct', 0, 'HVHM|req|' + this.scriptId + '|' + targetId); } catch (e) {}
-            this.notify({ title: 'Team Up', message: 'Sent team-up request.', timeout: 2000 });
-        }
-
-        sendTeamAck(toId) {
-            if (!this.wsSend) return;
-            try { this.wsSend('ct', 0, 'HVHM|ack|' + this.scriptId + '|' + toId); } catch (e) {}
-        }
-
-        acceptTeamRequest(fromId) {
-            this.addAlly(fromId);
-            this.sendTeamAck(fromId);
-            delete this.pendingRequests[fromId];
-            this.notify({ title: 'Team Up', message: 'You are now teamed up.', timeout: 2000 });
-        }
-
-        declineTeamRequest(fromId) {
-            delete this.pendingRequests[fromId];
-        }
-
-        addAlly(id) { this.allies[id] = { since: performance.now() }; }
-        removeAlly(id) { delete this.allies[id]; }
-
-        resolveName(id) {
-            const list = (this.game && this.game.players && this.game.players.list) || [];
-            for (const p of list) { if (p && (p.id === id || p.socketId === id)) return p.name || ('#' + id); }
-            return '#' + id;
-        }
-
-        refreshScriptPanel() {
-            const el = document.getElementById('hvhm-script-panel');
-            if (!el) return;
-            let html = '';
-            const users = Object.keys(this.scriptUsers).filter(id => id !== this.scriptId);
-            html += '<div class="hvhm-subsection">Script Users (' + users.length + ')</div>';
-            if (!users.length) html += '<div class="hvhm-note">No other HVHM users detected yet.</div>';
-            for (const id of users) {
-                const name = this.resolveName(id);
-                const isAlly = !!this.allies[id];
-                html += '<div class="hvhm-script-row"><span>' + this.escapeHtml(name) + (isAlly ? ' [ALLY]' : '') + '</span>' +
-                    (isAlly ? '<button class="hvhm-sm-btn" data-ally-remove="' + id + '">Remove</button>'
-                            : '<button class="hvhm-sm-btn" data-team="' + id + '">Team Up</button>') + '</div>';
-            }
-            const reqs = Object.keys(this.pendingRequests);
-            html += '<div class="hvhm-subsection">Requests (' + reqs.length + ')</div>';
-            if (!reqs.length) html += '<div class="hvhm-note">No pending requests.</div>';
-            for (const id of reqs) {
-                const name = this.resolveName(id);
-                html += '<div class="hvhm-script-row"><span>' + this.escapeHtml(name) + ' wants to team</span>' +
-                    '<span><button class="hvhm-sm-btn" data-accept="' + id + '">Accept</button>' +
-                    '<button class="hvhm-sm-btn" data-decline="' + id + '">Decline</button></span></div>';
-            }
-            const allyIds = Object.keys(this.allies);
-            html += '<div class="hvhm-subsection">Allies (' + allyIds.length + ')</div>';
-            if (!allyIds.length) html += '<div class="hvhm-note">No allies yet.</div>';
-            for (const id of allyIds) {
-                const name = this.resolveName(id);
-                html += '<div class="hvhm-script-row"><span>' + this.escapeHtml(name) + '</span>' +
-                    '<button class="hvhm-sm-btn" data-ally-remove="' + id + '">Remove</button></div>';
-            }
-            el.innerHTML = html;
-        }
-
-        escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
-
         getPlayerEntities() {
             const result = { entities: [], local: null };
             const scene = this.renderer && this.renderer.scene;
@@ -1214,11 +1106,8 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
         }
 
         isSniperADS() {
-            if (!this.settings.sniperNativeFov || this.isThirdPersonView()) return false;
             const weapon = this.me && this.me.weapon;
-            const aimValue = Number(this.me.aimVal);
-            // Krunker uses aimVal = 1 for hip-fire and approaches 0 while ADS.
-            if (!weapon || !(aimValue < 0.999 || this.me.isAiming || this.me.scoped || this.me.scope)) return false;
+            if (!weapon || !(Number(this.me.aimVal) > 0.001 || this.me.isAiming || this.me.scoped || this.me.scope)) return false;
             const name = String(weapon.name || weapon.n || weapon.label || '').toLowerCase();
             const zoom = Number(weapon.zoom);
             // Weapon tables are not consistent about exposing a sniper flag;
@@ -1237,8 +1126,15 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
                 return;
             }
 
-            // FOV changer always wins: the game is never allowed to alter the
-            // field of view (including ADS/scope) while a non-zero value is set.
+            // Do not override a sniper's native ADS projection. The game owns
+            // that zoom while scoped; the selected FOV returns immediately when
+            // the scope is released.
+            if (this.isSniperADS()) {
+                for (const [camera, state] of this._fovCameraLocks) this._unlockFOVCamera(camera, state);
+                this._fovCameraLocks.clear();
+                return;
+            }
+
             const cameras = new Set();
             scene.traverse(child => { if (child && child.isCamera) cameras.add(child); });
             if (this.renderer.camera) cameras.add(this.renderer.camera);
@@ -1429,7 +1325,6 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
                     const p = this.game.players.list[i];
                     if (this.isDefined(p) && !p.isYou && p.active && p.health > 0 &&
                         (!this.settings.aimbotTeamCheck || !this.isTeam(p)) &&
-                        !this.allies[p.id] &&
                         (!this.settings.aimbotWallCheck || this.getCanSee(p))) {
                         p.isBot = false;
                         potentialTargets.push(p);
@@ -1576,23 +1471,20 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
             const me = this.me;
             if (!me) return;
             const realYaw = this.controls.object.rotation.y;
-            const lookPitch = (typeof s.antiAimLookDownPitch === 'number') ? s.antiAimLookDownPitch : -1.2;
 
-            // xdir = horizontal yaw, ydir = vertical pitch (matches the aimbot's
-            // own packet layout). Look-down keeps your real yaw and pitches down.
-            if (s.antiAimEnabled && !s.antiAimSpinEnabled) {
-                inputPacket[idx.xdir] = realYaw * 1000;
-                inputPacket[idx.ydir] = lookPitch * 1000;
-                return;
+            // Anti-aim is deliberately independent from spinbot: it only sends
+            // the look-down pitch and preserves the camera yaw.
+            if (s.antiAimEnabled) {
+                inputPacket[idx.ydir] = realYaw * 1000;
+                inputPacket[idx.xdir] = -Math.PI * 500;
             }
-
             if (!s.antiAimSpinEnabled) return;
 
             const inAir = !me.onGround;
             const now = performance.now();
             if (inAir && !this._aeroWasAirborne) this._aeroAirStartedAt = now;
             this._aeroWasAirborne = inAir;
-            const justLeftGround = now - this._aeroAirStartedAt < 120;
+            const justLeftGround = now - this._aeroAirStartedAt < 28;
             const verticalVelocity = Number(me.velocity && me.velocity.y);
             const landingNow = inAir && Number.isFinite(verticalVelocity) &&
                 verticalVelocity < -0.07 && !!me.canSlide;
@@ -1606,19 +1498,16 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
                 const stepAngle = Math.PI / 4;
                 const spinSteps = ((Math.round(this.antiAimAngle / stepAngle) % 8) + 8) % 8;
                 const spinYaw = realYaw + spinSteps * stepAngle;
-                inputPacket[idx.xdir] = spinYaw * 1000;
-                inputPacket[idx.ydir] = lookPitch * 1000;
-                // Keep moving in the direction you were actually aiming: the
-                // world move angle is (table[moveDir] - sentYaw), so to preserve
-                // it we shift moveDir by the same spin offset.
+                inputPacket[idx.ydir] = spinYaw * 1000;
+                inputPacket[idx.xdir] = -Math.PI * 500;
                 const moveIndex = inputPacket[idx.moveDir];
                 if (Number.isInteger(moveIndex) && moveIndex >= 0 && moveIndex < 8) {
-                    inputPacket[idx.moveDir] = ((moveIndex + spinSteps) % 8 + 8) % 8;
+                    inputPacket[idx.moveDir] = ((moveIndex - spinSteps) % 8 + 8) % 8;
                 }
             } else {
-                inputPacket[idx.xdir] = realYaw * 1000;
-                if (s.antiAimEnabled) {
-                    inputPacket[idx.ydir] = lookPitch * 1000;
+                inputPacket[idx.ydir] = realYaw * 1000;
+                if (s.antiAimEnabled && !inAir) {
+                    inputPacket[idx.xdir] = -Math.PI * 500;
                 }
             }
         }
@@ -1645,7 +1534,6 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
         showGUI() {
             if (this.game && !this.game.gameClosed) { if (document.pointerLockElement || document.mozPointerLockElement) { document.exitPointerLock(); } }
             window.showWindow(this.GUI.windowIndex);
-            if (this._scriptNetReady) this.refreshScriptPanel();
         }
 
         initGameGUI() {
@@ -1655,15 +1543,8 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
             document.head.appendChild(fontLink);
 
             const menuCSS = `
-.hvhm-menu-container{position:fixed!important;top:18px!important;left:50%!important;transform:translateX(-50%)!important;width:960px!important;max-width:96vw!important;max-height:74vh!important;background:#151515!important;border:1px solid rgba(255,255,255,0.10)!important;border-radius:10px!important;box-shadow:0 14px 38px rgba(0,0,0,0.38)!important;color:#e8e8e8!important;font-family:'Instrument Sans','Segoe UI',system-ui,sans-serif!important;overflow:visible!important;display:flex!important;flex-direction:column!important;}
+.hvhm-menu-container{position:fixed!important;top:18px!important;left:50%!important;transform:translateX(-50%)!important;width:960px!important;max-width:96vw!important;max-height:88vh!important;background:#151515!important;border:1px solid rgba(255,255,255,0.10)!important;border-radius:10px!important;box-shadow:0 14px 38px rgba(0,0,0,0.38)!important;color:#e8e8e8!important;font-family:'Instrument Sans','Segoe UI',system-ui,sans-serif!important;overflow:visible!important;display:flex!important;flex-direction:column!important;}
 .hvhm-menu{display:flex!important;flex-direction:column!important;width:100%!important;height:100%!important;background:#151515!important;border-radius:10px!important;overflow:hidden!important;}
-.hvhm-script-panel{display:flex!important;flex-direction:column!important;gap:2px!important;padding:4px 4px 8px!important;}
-.hvhm-subsection{font-size:10px!important;text-transform:uppercase!important;letter-spacing:1px!important;color:rgba(255,255,255,0.45)!important;margin:8px 0 2px!important;font-weight:700!important;}
-.hvhm-note{font-size:11px!important;color:rgba(255,255,255,0.35)!important;padding:2px 0!important;}
-.hvhm-script-row{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:8px!important;font-size:12px!important;color:#e8e8e8!important;padding:3px 2px!important;}
-.hvhm-script-row>span{display:flex!important;gap:6px!important;align-items:center!important;}
-.hvhm-sm-btn{flex:0 0 auto!important;background:#232323!important;color:#fff!important;border:1px solid rgba(255,255,255,0.14)!important;border-radius:6px!important;padding:3px 8px!important;font-size:11px!important;cursor:pointer!important;font-family:inherit!important;}
-.hvhm-sm-btn:hover{background:#2e2e2e!important;}
 .hvhm-menu-titlebar{height:38px!important;display:flex!important;align-items:center!important;justify-content:space-between!important;padding:0 20px!important;box-sizing:border-box!important;background:#181818!important;border-bottom:1px solid rgba(255,255,255,.07)!important;color:#e8e8e8!important;font-size:12px!important;font-weight:700!important;letter-spacing:1.1px!important;text-transform:uppercase!important;cursor:move!important;user-select:none!important;flex-shrink:0!important;}
 .hvhm-menu-titlebar span:last-child{font-size:9px!important;color:rgba(255,255,255,.35)!important;font-weight:500!important;}
 .hvhm-tab-container{display:flex!important;flex-direction:row!important;background:#181818!important;border-bottom:1px solid rgba(255,255,255,0.07)!important;flex-shrink:0!important;border-radius:10px 10px 0 0!important;}
@@ -1681,8 +1562,6 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
 .hvhm-section,.hvhm-menu-item[data-setting-share],.hvhm-menu-item[data-setting="customSoundPack"]{grid-column:1 / -1!important;}
 .hvhm-menu-item:nth-of-type(odd){border-right:1px solid rgba(255,255,255,0.035)!important;}
 .hvhm-menu-item:hover{background:rgba(255,255,255,0.025)!important;}
-.hvhm-menu-item.hvhm-disabled{opacity:.38!important;filter:grayscale(1)!important;cursor:not-allowed!important;}
-.hvhm-menu-item.hvhm-disabled .hvhm-controls{pointer-events:none!important;}
 .hvhm-menu-item-content{display:flex!important;align-items:center!important;gap:12px!important;color:#f5f5f5!important;min-width:0!important;}
 .hvhm-menu-item-icon{width:17px!important;height:17px!important;fill:rgba(255,255,255,0.62)!important;stroke:currentColor!important;stroke-linecap:round!important;stroke-linejoin:round!important;flex-shrink:0!important;}
 .hvhm-menu-item-content label{cursor:pointer!important;font-size:15px!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;}
@@ -1806,9 +1685,8 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
                 espTeamCheck:'No ESP for teammates.', espBotCheck:'ESP for AI/bots.',
                 espLines:'Line from bottom to enemies.', espSquare:'Flat screen-space box around enemies.', esp3DBoxes:'3D box around player models.',
                  espNameTags:'Shows player names.', espColor:'ESP line color.',
-                espWeapon:'Shows the equipped weapon name below players.', espWeaponIcon:'Shows the equipped weapon icon.', espLevel:'Shows player level independently above the box.', espDistance:'Shows distance below players.', espScale:'Scales ESP text, lines and bars.', skeletonESP:'Draws player joints using live model bones when available.', selfESP:'Shows the normal overlay on your own player.', selfSkeletonESP:'Shows the animated skeleton on your own player independently.', selfESPView:'Choose which camera view displays self ESP.',
-                visibleTargetAlert:'Shows a small HUD alert when the nearest enemy within 180 game units is visible and hittable.',
-noRecoil:'Removes weapon recoil.', noSpread:'Removes weapon spread.', rapidFire:'Massively increases fire rate.', infiniteAmmo:'Keeps your ammo at 9999.', instantReload:'Skips the reload timer.', godMode:'Prevents all incoming damage.', fly:'Lets you fly by looking and moving (noclip).', speedHack:'Multiplies your movement speed.', speedHackValue:'Movement speed multiplier.', recon:'Grants the recon/ghost vision perk.', bulletTracers:'Draws tracers when you shoot.', hitmarkers:'Shows a hitmarker when you damage a player.', scriptNetEnabled:'Lets other HVHM users detect you and team up.', scriptNetAutoTeam:'Automatically accepts team-up requests from other HVHM users.',
+                 espWeapon:'Shows the equipped weapon name below players.', espWeaponIcon:'Shows the equipped weapon icon.', espLevel:'Shows player level independently above the box.', espDistance:'Shows distance below players.', espScale:'Scales ESP text, lines and bars.', skeletonESP:'Draws player joints using live model bones when available.', selfESP:'Shows the normal overlay on your own player.', selfSkeletonESP:'Shows the animated skeleton on your own player independently.', selfESPView:'Choose which camera view displays self ESP.',
+noRecoil:'Removes weapon recoil.', noSpread:'Removes weapon spread.', rapidFire:'Massively increases fire rate.', infiniteAmmo:'Keeps your ammo at 9999.', instantReload:'Skips the reload timer.', godMode:'Prevents all incoming damage.', fly:'Lets you fly by looking and moving (noclip).', speedHack:'Multiplies your movement speed.', speedHackValue:'Movement speed multiplier.', recon:'Grants the recon/ghost vision perk.', bulletTracers:'Draws tracers when you shoot.', hitmarkers:'Shows a hitmarker when you damage a player.',
                 boxColor:'Box & info color.', botColor:'Bot ESP color.',
                 wireframeEnabled:'Wireframe rendering.', unlockSkins:'Client-side skin unlocker.',
                 bhopEnabled:'Hold space auto-jump.', antiAimEnabled:'Anti-aim pose: makes your character look down while preserving camera yaw.',
@@ -1818,8 +1696,7 @@ noRecoil:'Removes weapon recoil.', noSpread:'Removes weapon spread.', rapidFire:
                 thirdPersonEnabled: 'Play in 3rd person view.',
                 alwaysTrail: 'Always show bullet trails.',
                 weaponZoom: 'Adjust ADS zoom level (1 = default).',
-                fovChanger: 'Changes camera FOV. 0 = off; sniper native ADS behavior is controlled separately.',
-                sniperNativeFov: 'Use the game\'s native sniper ADS FOV while scoped in first person. Disabled automatically in third person.',
+                fovChanger: 'Changes camera FOV. 0 = off; sniper ADS always keeps its native scope zoom.',
                 chamsEnabled: 'Highlights player models with separate normal and visible colors.',
                 chamsThroughWalls: 'Chams render through walls (no depth).',
                 chamsEnemyColor: 'Color for enemy player models.',
@@ -1882,9 +1759,7 @@ noRecoil:'Removes weapon recoil.', noSpread:'Removes weapon spread.', rapidFire:
             <div class="hvhm-section">Camera</div>
             ${this.createMenuItemHTML('toggle','thirdPersonEnabled','Third Person', I.robot, tips.thirdPersonEnabled)}
             ${this.createMenuItemHTML('toggle','alwaysTrail','Weapon Trails', I.line, tips.alwaysTrail)}
-            ${this.createMenuItemHTML('toggle','visibleTargetAlert','Visible Target Alert', I.espInfoBg, tips.visibleTargetAlert)}
             ${this.createMenuItemHTML('slider','fovChanger','FOV Changer (0=off)', I.fov, tips.fovChanger, 0, 160, 1)}
-            ${this.createMenuItemHTML('toggle','sniperNativeFov','Native Sniper ADS FOV', I.fov, tips.sniperNativeFov)}
             <div class="hvhm-section">Overlay</div>
             ${this.createMenuItemHTML('slider','espScale','ESP Scale', I.espSquare, tips.espScale, 0.5, 2.5, 0.05)}
             ${this.createSelectMenuItemHTML('espBoxMode','ESP Box Style', I.espSquare, tips.espSquare, [['off','Off'],['2d','2D'],['3d','3D']], 'espBoxColor', 'espBoxVisibleColor')}
@@ -1937,23 +1812,9 @@ noRecoil:'Removes weapon recoil.', noSpread:'Removes weapon spread.', rapidFire:
         <div class="hvhm-tab-pane" id="hvhm-tab-beta">
             <div class="hvhm-section">Weapon</div>
             ${this.createMenuItemHTML('toggle','noRecoil','No Recoil', I.recoil, tips.noRecoil)}
-            ${this.createMenuItemHTML('toggle','noSpread','No Spread', I.espSquare, tips.noSpread)}
-            ${this.createMenuItemHTML('toggle','rapidFire','Rapid Fire', I.autoFire, tips.rapidFire)}
-            ${this.createMenuItemHTML('toggle','infiniteAmmo','Infinite Ammo', I.rocket, tips.infiniteAmmo)}
-            ${this.createMenuItemHTML('toggle','instantReload','Instant Reload', I.autoReload, tips.instantReload)}
-            <div class="hvhm-section">Player</div>
-            ${this.createMenuItemHTML('toggle','godMode','God Mode', I.rocket, tips.godMode)}
-            ${this.createMenuItemHTML('toggle','fly','Fly (Noclip)', I.bounce, tips.fly)}
-            ${this.createMenuItemHTML('toggle','speedHack','Speed Hack', I.bounce, tips.speedHack)}
-            ${this.createMenuItemHTML('slider','speedHackValue','Speed Multiplier', I.bounce, tips.speedHackValue, 1, 5, 0.1)}
-            ${this.createMenuItemHTML('toggle','recon','Recon (Ghost)', I.robot, tips.recon)}
             <div class="hvhm-section">Visual</div>
             ${this.createMenuItemHTML('toggle','bulletTracers','Bullet Tracers', I.line, tips.bulletTracers)}
             ${this.createMenuItemHTML('toggle','hitmarkers','Hitmarkers', I.aimbot, tips.hitmarkers)}
-            <div class="hvhm-section">Script Network</div>
-            ${this.createMenuItemHTML('toggle','scriptNetEnabled','Detect HVHM Users', I.robot, tips.scriptNetEnabled)}
-            ${this.createMenuItemHTML('toggle','scriptNetAutoTeam','Auto-Team Script Users', I.robot, tips.scriptNetAutoTeam)}
-            <div id="hvhm-script-panel" class="hvhm-script-panel"></div>
             <div class="hvhm-section">Audio</div>
             ${this.createSoundPackMenuHTML(I.sound, tips.customSoundPack)}
         </div>
@@ -2102,7 +1963,6 @@ noRecoil:'Removes weapon recoil.', noSpread:'Removes weapon spread.', rapidFire:
 
                 const menuItem = e.target.closest('.hvhm-menu-item');
                 if (!menuItem) return;
-                if (menuItem.classList.contains('hvhm-disabled')) return;
                 const setting = menuItem.dataset.setting;
                 if (!setting || menuItem.querySelector('.hvhm-slider-container')) return;
 
@@ -2113,26 +1973,12 @@ noRecoil:'Removes weapon recoil.', noSpread:'Removes weapon spread.', rapidFire:
                     this.saveSettings('hvhm_settings', this.settings);
                     menuItem.classList.toggle('active');
                     menuItem.querySelector('.hvhm-toggle-switch').classList.toggle('active');
-                    this.updateAimbotControlState(menu);
                     this._refreshESPLayoutPreview(menu);
-                    
+
                 } else if (menuItem.querySelector('.hvhm-color-picker-input')) {
                     menuItem.querySelector('.hvhm-color-picker-input').click();
                 }
             });
-
-            const scriptPanel = menu.querySelector('#hvhm-script-panel');
-            if (scriptPanel) {
-                scriptPanel.addEventListener('click', (e) => {
-                    const btn = e.target.closest('button[data-team],button[data-accept],button[data-decline],button[data-ally-remove]');
-                    if (!btn) return;
-                    if (btn.dataset.team) this.sendTeamRequest(btn.dataset.team);
-                    else if (btn.dataset.accept) this.acceptTeamRequest(btn.dataset.accept);
-                    else if (btn.dataset.decline) this.declineTeamRequest(btn.dataset.decline);
-                    else if (btn.dataset.allyRemove) this.removeAlly(btn.dataset.allyRemove);
-                    this.refreshScriptPanel();
-                });
-            }
 
             menu.querySelectorAll('.hvhm-color-picker-input').forEach(cp => cp.addEventListener('input', (e) => {
                 const setting = e.target.dataset.setting;
@@ -2141,7 +1987,7 @@ noRecoil:'Removes weapon recoil.', noSpread:'Removes weapon spread.', rapidFire:
                 const preview = menu.querySelector(`.hvhm-color-preview[data-setting="${setting}"]`);
                 if (preview) preview.style.backgroundColor = e.target.value;
                 this._refreshESPLayoutPreview(menu);
-                
+
             }));
             menu.querySelectorAll('.hvhm-inline-color').forEach(cp => cp.addEventListener('click', (e) => e.stopPropagation()));
             menu.querySelectorAll('.hvhm-select').forEach(select => select.addEventListener('change', e => {
@@ -2206,19 +2052,6 @@ noRecoil:'Removes weapon recoil.', noSpread:'Removes weapon spread.', rapidFire:
             });
             this.bindESPLayoutEditor(menu);
             this.bindMenuWindowInteraction(menu);
-            this.updateAimbotControlState(menu);
-        }
-
-        updateAimbotControlState(menu) {
-            if (!menu) return;
-            const dependent = ['aimbotOnAimKey','aimKey','aimbotFovCheck','aimBone','fovSize','drawFovCircle','aimbotTeamCheck','aimbotBotCheck','aimbotWallCheck','aimbotWallBangs','autoFireEnabled','legitAimbot','superSilentEnabled','flickSpeed','aimRandomness','aimTremor','adsTremorReduction','aimOffset'];
-            const disabled = !this.settings.aimbotEnabled;
-            for (const setting of dependent) {
-                const row = menu.querySelector(`.hvhm-menu-item[data-setting="${setting}"]`);
-                if (!row) continue;
-                row.classList.toggle('hvhm-disabled', disabled);
-                row.querySelectorAll('input,select,button').forEach(control => { control.disabled = disabled; });
-            }
         }
 
         bindMenuWindowInteraction(menu) {
@@ -2453,7 +2286,7 @@ noRecoil:'Removes weapon recoil.', noSpread:'Removes weapon spread.', rapidFire:
                             const item = menu.querySelector(`.hvhm-menu-item[data-setting="${action}"]`);
                             if (item) { item.classList.toggle('active', this.settings[action]); const toggle = item.querySelector('.hvhm-toggle-switch'); if (toggle) toggle.classList.toggle('active', this.settings[action]); }
                         }
-                        
+
                     }
                 }
             });
@@ -3032,12 +2865,6 @@ noRecoil:'Removes weapon recoil.', noSpread:'Removes weapon spread.', rapidFire:
                     this.ctx.fillStyle = levelColor;
                     CRC2d.fillText.apply(this.ctx, [`LV ${level}`, layout.level.x, layout.level.y]);
                 }
-            }
-            if (showStandard && player.id && (this.scriptUsers[player.id] || this.allies[player.id])) {
-                const isAlly = !!this.allies[player.id];
-                this.ctx.font = `700 ${10 * espScale}px 'IBM Plex Mono', monospace`; this.ctx.textAlign = 'center';
-                this.ctx.fillStyle = isAlly ? '#39ff88' : '#36e0ff';
-                CRC2d.fillText.apply(this.ctx, [isAlly ? 'ALLY' : 'SCRIPT', layout.name.x, layout.name.y + 14 * espScale]);
             }
             if (showStandard && this.settings.espDistance) {
                 const distance = Math.round(Math.sqrt((this.me.x-player.x)**2+(this.me.y-player.y)**2+(this.me.z-player.z)**2) / 10);
