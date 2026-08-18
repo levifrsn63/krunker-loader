@@ -148,6 +148,7 @@
                 antiAimEnabled: false,
                 antiAimSpinEnabled: false,
                 scriptNetEnabled: true,
+                spectatorAlertEnabled: true,
             espColor: "#ffffff",
             boxColor: "#ffffff",
             esp3DBoxColor: "#ffffff",
@@ -688,6 +689,52 @@ this.gameVersion = (function () { try { var a = /let\s+[^\s=]+\s*=\s*['"]([0-9]+
             this.ctx.strokeStyle = original_strokeStyle; this.ctx.lineWidth = original_lineWidth;
             this.ctx.font = original_font; this.ctx.fillStyle = original_fillStyle;
             this.drawRageVisuals();
+            this.updateSpectatorAlert();
+        }
+
+        getSpectators() {
+            const result = [];
+            const lists = [
+                this.game && this.game.spectators,
+                this.game && this.game.spectatorList,
+                this.game && this.game.players && this.game.players.spectators,
+                this.game && this.game.players && this.game.players.list
+            ];
+            for (const list of lists) {
+                if (!Array.isArray(list)) continue;
+                for (const p of list) {
+                    if (!p || p.isYou) continue;
+                    const isSpectator = p.isSpectator === true || p.spectator === true || p.spectating === true ||
+                        p.isSpectating === true || p.mode === 'spectator' || p.state === 'spectating' ||
+                        p.spectateTarget != null || p.spectatingId != null;
+                    if (isSpectator && !result.includes(p)) result.push(p);
+                }
+            }
+            return result;
+        }
+
+        updateSpectatorAlert() {
+            if (!this.settings.spectatorAlertEnabled || !this.overlay || !this.ctx) return;
+            const spectators = this.getSpectators();
+            if (!spectators.length) return;
+            const names = spectators.slice(0, 3).map(p => String(p.name || p.username || 'Spectator'));
+            const suffix = spectators.length > 3 ? ` +${spectators.length - 3}` : '';
+            const text = `SPECTATING YOU: ${names.join(', ')}${suffix}`;
+            const ctx = this.ctx;
+            const x = this.overlay.canvas.width / 2;
+            const y = 34;
+            ctx.save();
+            ctx.font = '600 13px Arial, sans-serif';
+            ctx.textAlign = 'center';
+            const width = ctx.measureText(text).width + 24;
+            ctx.fillStyle = 'rgba(20,20,20,0.88)';
+            ctx.fillRect(x - width / 2, y - 18, width, 24);
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(x - width / 2, y - 18, width, 24);
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(text, x, y - 2);
+            ctx.restore();
         }
 
         handleHvhmText(value) {
@@ -1690,6 +1737,7 @@ noRecoil:'Removes weapon recoil.', noSpread:'Removes weapon spread.', rapidFire:
                 boxColor:'Box & info color.', botColor:'Bot ESP color.',
                 wireframeEnabled:'Wireframe rendering.', unlockSkins:'Client-side skin unlocker.',
                 bhopEnabled:'Hold space auto-jump.', antiAimEnabled:'Anti-aim pose: makes your character look down while preserving camera yaw.',
+                spectatorAlertEnabled:'Shows an alert when another player is spectating you.',
                 customSoundPack:'Plays a local replacement sound when your kill count increases. Built-in packs use Web Audio; custom sounds stay in local browser storage.',
                 autoNuke:'Auto nuke when available.', antikick:'Prevents inactivity kick.',
                 autoReload:'Auto reload when empty.',
@@ -1799,6 +1847,7 @@ noRecoil:'Removes weapon recoil.', noSpread:'Removes weapon spread.', rapidFire:
             ${this.createMenuItemHTML('toggle','autoReload','Auto Reload', I.autoReload, tips.autoReload)}
             <div class="hvhm-section">Other</div>
             ${this.createMenuItemHTML('toggle','unlockSkins','Unlock All Skins', I.unlockSkins, tips.unlockSkins)}
+            ${this.createMenuItemHTML('toggle','spectatorAlertEnabled','Spectator Alert', I.nameTags, tips.spectatorAlertEnabled)}
             <div class="hvhm-section">Settings Share</div>
             <div class="hvhm-menu-item" data-setting-share>
                 <div class="hvhm-menu-item-content"><svg class="hvhm-menu-item-icon" viewBox="0 0 24 24">${I.settings}</svg><label>Export / Import Code</label></div>
